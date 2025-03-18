@@ -511,17 +511,20 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 
 	if (queue_id >= RTE_MAX_QUEUES_PER_PORT || lcore_id >= RTE_MAX_LCORE) {
 		ret = -EINVAL;
+		printf("returning from queue_id||lcore_id with ret:%d\n",ret);
 		goto end;
 	}
 
 	if (rte_eth_dev_info_get(port_id, &info) < 0) {
 		ret = -EINVAL;
+		printf("returning from cfg_queues_stopped with ret:%d\n",ret);
 		goto end;
 	}
 
 	/* check if queue id is valid */
 	if (queue_id >= info.nb_rx_queues) {
 		ret = -EINVAL;
+		printf("returning from queue_id.invalid with ret:%d\n",ret);
 		goto end;
 	}
 
@@ -530,6 +533,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 	if (ret != 1) {
 		/* error means invalid queue, 0 means queue wasn't stopped */
 		ret = ret < 0 ? -EINVAL : -EBUSY;
+		printf("returning from (this)queue_stopped with ret:%d\n",ret);
 		goto end;
 	}
 
@@ -541,6 +545,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 	if (ret != 1) {
 		/* error means invalid queue, 0 means queue wasn't stopped */
 		ret = ret < 0 ? -EINVAL : -EBUSY;
+		printf("returning from cfg_queues_stopped with ret:%d\n",ret);
 		goto end;
 	}
 
@@ -548,6 +553,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 	if (lcore_cfg->pwr_mgmt_state != PMD_MGMT_DISABLED &&
 			lcore_cfg->cb_mode != mode) {
 		ret = -EINVAL;
+		printf("returning from PMD_MGMT_DISABLED with ret:%d\n",ret);
 		goto end;
 	}
 
@@ -559,6 +565,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		/* check if we can add a new queue */
 		ret = check_monitor(lcore_cfg, &qdata);
 		if (ret < 0)
+			printf("returning from RTE_POWER_MGMT_TYPE_MONITOR with ret:%d\n",ret);
 			goto end;
 
 		clb = get_monitor_callback();
@@ -572,6 +579,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		/* check if we can add a new queue */
 		ret = check_scale(lcore_id);
 		if (ret < 0)
+			printf("returning from RTE_POWER_MGMT_TYPE_SCALE with ret:%d\n",ret);
 			goto end;
 		break;
 	case RTE_POWER_MGMT_TYPE_PAUSE:
@@ -584,6 +592,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 	default:
 		POWER_LOG(DEBUG, "Invalid power management type");
 		ret = -EINVAL;
+		printf("returning from default with ret:%d\n",ret);
 		goto end;
 	}
 	/* add this queue to the list */
@@ -591,6 +600,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 	if (ret < 0) {
 		POWER_LOG(DEBUG, "Failed to add queue to list: %s",
 				strerror(-ret));
+		printf("returning from queue_list_add with ret:%d\n",ret);
 		goto end;
 	}
 	/* new queue is always added last */
@@ -610,6 +620,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 
 	ret = 0;
 end:
+	printf("returning from lib power with ret:%d\n",ret);
 	return ret;
 }
 
