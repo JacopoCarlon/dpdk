@@ -2839,14 +2839,18 @@ main(int argc, char **argv)
 					rte_exit(EXIT_FAILURE,
 						"Error setting scaling freq max: err=%d, lcore %d\n",
 							ret, lcore_id);
-
+				printf("finished rte_power_pmd_mgmt_set_scaling_freq_max call\n");
+				
 				ret = rte_power_ethdev_pmgmt_queue_enable(
 						lcore_id, portid, queueid,
 						pmgmt_type);
+				printf("finished rte_power_ethdev_pmgmt_queue_enable call\n");
 				if (ret < 0)
 					rte_exit(EXIT_FAILURE,
 						"rte_power_ethdev_pmgmt_queue_enable: err=%d, port=%d\n",
 							ret, portid);
+
+				printf("End of power library initialization.\n");
 			}
 		}
 	}
