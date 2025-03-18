@@ -564,9 +564,10 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 	case RTE_POWER_MGMT_TYPE_MONITOR:
 		/* check if we can add a new queue */
 		ret = check_monitor(lcore_cfg, &qdata);
-		if (ret < 0)
+		if (ret < 0){
 			printf("returning from RTE_POWER_MGMT_TYPE_MONITOR with ret:%d\n",ret);
 			goto end;
+		}
 
 		clb = get_monitor_callback();
 		break;
@@ -578,9 +579,10 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 			break;
 		/* check if we can add a new queue */
 		ret = check_scale(lcore_id);
-		if (ret < 0)
+		if (ret < 0){
 			printf("returning from RTE_POWER_MGMT_TYPE_SCALE with ret:%d\n",ret);
 			goto end;
+		}
 		break;
 	case RTE_POWER_MGMT_TYPE_PAUSE:
 		/* figure out various time-to-tsc conversions */
