@@ -572,12 +572,15 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		clb = get_monitor_callback();
 		break;
 	case RTE_POWER_MGMT_TYPE_SCALE:
+		printf("!!! RTE_POWER_MGMT_TYPE_SCALE checking --- \n\n");
+
 		clb = clb_scale_freq;
 
 		/* we only have to check this when enabling first queue */
 		if (lcore_cfg->pwr_mgmt_state != PMD_MGMT_DISABLED)
 			break;
 		/* check if we can add a new queue */
+		printf("!!! RTE_POWER_MGMT_TYPE_SCALE after break ! --- \n");
 		ret = check_scale(lcore_id);
 		if (ret < 0){
 			printf("returning from RTE_POWER_MGMT_TYPE_SCALE with ret:%d\n",ret);
