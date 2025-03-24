@@ -444,7 +444,7 @@ check_scale(unsigned int lcore)
 	}
 	/* ensure we could initialize the power library */
 	if (rte_power_init(lcore))
-		return -EINVAL;
+		return -EINVAL; // -22 
 
 	/* ensure we initialized the correct env */
 	env = rte_power_get_env();
