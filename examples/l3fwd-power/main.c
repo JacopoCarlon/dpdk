@@ -2776,7 +2776,7 @@ main(int argc, char **argv)
 					power_timer_cb, NULL);
 		}
 		qconf = &lcore_conf[lcore_id];
-		printf("\nInitializing rx queues on lcore %u ... ", lcore_id );
+		printf("\nInitializing rx queues on lcore %u ... \n", lcore_id );
 		fflush(stdout);
 
 		/* init RX queues */

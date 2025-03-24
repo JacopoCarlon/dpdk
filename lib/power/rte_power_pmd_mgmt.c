@@ -439,7 +439,8 @@ check_scale(unsigned int lcore)
 			!rte_power_check_env_supported(PM_ENV_AMD_PSTATE_CPUFREQ) &&
 			!rte_power_check_env_supported(PM_ENV_CPPC_CPUFREQ)) {
 		POWER_LOG(DEBUG, "Only ACPI, PSTATE, AMD-PSTATE, or CPPC modes are supported");
-		return -ENOTSUP;
+		printf("check_scale : Only ACPI, PSTATE, AMD-PSTATE, or CPPC modes are supported");
+		return -ENOTSUP; // -95
 	}
 	/* ensure we could initialize the power library */
 	if (rte_power_init(lcore))
@@ -450,7 +451,8 @@ check_scale(unsigned int lcore)
 	if (env != PM_ENV_ACPI_CPUFREQ && env != PM_ENV_PSTATE_CPUFREQ &&
 			env != PM_ENV_AMD_PSTATE_CPUFREQ && env != PM_ENV_CPPC_CPUFREQ) {
 		POWER_LOG(DEBUG, "Unable to initialize ACPI, PSTATE, AMD-PSTATE, or CPPC modes");
-		return -ENOTSUP;
+		printf("check_scale : Unable to initialize ACPI, PSTATE, AMD-PSTATE, or CPPC modes");
+		return -ENOTSUP; //-95
 	}
 
 	/* we're done */
@@ -466,7 +468,8 @@ check_monitor(struct pmd_core_cfg *cfg, const union queue *qdata)
 	/* check if rte_power_monitor is supported */
 	if (!global_data.intrinsics_support.power_monitor) {
 		POWER_LOG(DEBUG, "Monitoring intrinsics are not supported");
-		return -ENOTSUP;
+		printf("check_monitor : Monitoring intrinsics are not supported");
+		return -ENOTSUP; //-95
 	}
 	/* check if multi-monitor is supported */
 	multimonitor_supported =
@@ -475,14 +478,16 @@ check_monitor(struct pmd_core_cfg *cfg, const union queue *qdata)
 	/* if we're adding a new queue, do we support multiple queues? */
 	if (cfg->n_queues > 0 && !multimonitor_supported) {
 		POWER_LOG(DEBUG, "Monitoring multiple queues is not supported");
-		return -ENOTSUP;
+		printf("check_monitor : Monitoring intrinsics are not supported");
+		return -ENOTSUP; //-95
 	}
 
 	/* check if the device supports the necessary PMD API */
 	if (rte_eth_get_monitor_addr(qdata->portid, qdata->qid,
 			&dummy) == -ENOTSUP) {
 		POWER_LOG(DEBUG, "The device does not support rte_eth_get_monitor_addr");
-		return -ENOTSUP;
+		printf("check_monitor : Monitoring intrinsics are not supported");
+		return -ENOTSUP; //-95
 	}
 
 	/* we're done */
@@ -565,6 +570,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		/* check if we can add a new queue */
 		ret = check_monitor(lcore_cfg, &qdata);
 		if (ret < 0){
+			// here gets -95
 			printf("returning from RTE_POWER_MGMT_TYPE_MONITOR with ret:%d\n",ret);
 			goto end;
 		}
@@ -572,7 +578,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		clb = get_monitor_callback();
 		break;
 	case RTE_POWER_MGMT_TYPE_SCALE:
-		printf("!!! RTE_POWER_MGMT_TYPE_SCALE checking --- \n\n");
+		printf("!!! RTE_POWER_MGMT_TYPE_SCALE checking --- \n");
 
 		clb = clb_scale_freq;
 
@@ -583,6 +589,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		printf("!!! RTE_POWER_MGMT_TYPE_SCALE after break ! --- \n");
 		ret = check_scale(lcore_id);
 		if (ret < 0){
+			// here gets -95
 			printf("returning from RTE_POWER_MGMT_TYPE_SCALE with ret:%d\n",ret);
 			goto end;
 		}
