@@ -440,7 +440,7 @@ check_scale(unsigned int lcore)
 			!rte_power_check_env_supported(PM_ENV_AMD_PSTATE_CPUFREQ) &&
 			!rte_power_check_env_supported(PM_ENV_CPPC_CPUFREQ)) {
 		POWER_LOG(DEBUG, "Only ACPI, PSTATE, AMD-PSTATE, or CPPC modes are supported");
-		printf("check_scale : Only ACPI, PSTATE, AMD-PSTATE, or CPPC modes are supported");
+		printf("--- check_scale : Only ACPI, PSTATE, AMD-PSTATE, or CPPC modes are supported\n");
 		return -ENOTSUP; // -95
 	}
 	/* ensure we could initialize the power library */
@@ -452,7 +452,7 @@ check_scale(unsigned int lcore)
 	if (env != PM_ENV_ACPI_CPUFREQ && env != PM_ENV_PSTATE_CPUFREQ &&
 			env != PM_ENV_AMD_PSTATE_CPUFREQ && env != PM_ENV_CPPC_CPUFREQ) {
 		POWER_LOG(DEBUG, "Unable to initialize ACPI, PSTATE, AMD-PSTATE, or CPPC modes");
-		printf("check_scale : Unable to initialize ACPI, PSTATE, AMD-PSTATE, or CPPC modes");
+		printf("--- check_scale : Unable to initialize ACPI, PSTATE, AMD-PSTATE, or CPPC modes\n");
 		return -ENOTSUP; //-95
 	}
 
@@ -469,7 +469,7 @@ check_monitor(struct pmd_core_cfg *cfg, const union queue *qdata)
 	/* check if rte_power_monitor is supported */
 	if (!global_data.intrinsics_support.power_monitor) {
 		POWER_LOG(DEBUG, "Monitoring intrinsics are not supported");
-		printf("check_monitor : Monitoring intrinsics are not supported");
+		printf("--- check_monitor : Monitoring intrinsics are not supported\n");
 		return -ENOTSUP; //-95
 	}
 	/* check if multi-monitor is supported */
@@ -479,7 +479,7 @@ check_monitor(struct pmd_core_cfg *cfg, const union queue *qdata)
 	/* if we're adding a new queue, do we support multiple queues? */
 	if (cfg->n_queues > 0 && !multimonitor_supported) {
 		POWER_LOG(DEBUG, "Monitoring multiple queues is not supported");
-		printf("check_monitor : Monitoring intrinsics are not supported");
+		printf("--- check_monitor : Monitoring multiple queues is not supported\n");
 		return -ENOTSUP; //-95
 	}
 
@@ -487,7 +487,7 @@ check_monitor(struct pmd_core_cfg *cfg, const union queue *qdata)
 	if (rte_eth_get_monitor_addr(qdata->portid, qdata->qid,
 			&dummy) == -ENOTSUP) {
 		POWER_LOG(DEBUG, "The device does not support rte_eth_get_monitor_addr");
-		printf("check_monitor : Monitoring intrinsics are not supported");
+		printf("--- check_monitor : The device does not support rte_eth_get_monitor_addr\n");
 		return -ENOTSUP; //-95
 	}
 
