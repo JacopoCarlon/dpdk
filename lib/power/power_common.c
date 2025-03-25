@@ -43,12 +43,12 @@ cpufreq_check_scaling_driver(const char *driver_name)
 		return 0;
 	}
 		
-	printf("--- ccsd before gets \n");
+	//printf("--- ccsd before gets \n");
 	s = fgets(readbuf, sizeof(readbuf), f);
 	/* don't need it any more */
 	fclose(f);
 
-	printf("--- ccsd done gets \n");
+	//printf("--- ccsd done gets \n");
 	/* if we can't read it, consider unsupported */
 	if (s == NULL){
 		printf("--- cannot read it\n");
@@ -63,8 +63,9 @@ cpufreq_check_scaling_driver(const char *driver_name)
 	}
 
 	/* does the driver name match? */
+	printf("... does driver have a name ?\n");
 	if (strncmp(readbuf, driver_name, sizeof(readbuf)) != 0){
-		printf("comparing %s and %s , they are not the same it seems \n", readbuf, driver_name);
+		printf("... comparing %s and %s , they are not the same it seems \n", readbuf, driver_name);
 		return 0;
 	}
 		
