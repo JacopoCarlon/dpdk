@@ -331,6 +331,7 @@ err:
 int
 power_cppc_cpufreq_check_supported(void)
 {
+	printf("calling cpufreq_check_scaling_driver on POWER_CPPC_DRIVER\n");
 	return cpufreq_check_scaling_driver(POWER_CPPC_DRIVER);
 }
 

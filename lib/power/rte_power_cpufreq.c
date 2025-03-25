@@ -37,6 +37,7 @@ rte_power_register_cpufreq_ops(struct rte_power_cpufreq_ops *driver_ops)
 		!driver_ops->turbo_status || !driver_ops->enable_turbo ||
 		!driver_ops->disable_turbo || !driver_ops->get_caps) {
 		POWER_LOG(ERR, "Missing callbacks while registering cpufreq ops");
+		printf("exiting by -1 : rte_power_register_cpufreq_ops\n");
 		printf("this time we exited !, btw <!driver_ops->check_env_support> ? %d \n", !driver_ops->check_env_support);
 		return -1;
 	}
