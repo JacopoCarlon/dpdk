@@ -2263,8 +2263,16 @@ init_power_library(void)
 				lcore_id);
 			return ret;
 		}
+		printf("--- done init_power_library : rte_power_init ! let's see what we got here\n");
 		/* we're not supporting the VM channel mode */
 		env = rte_power_get_env();
+
+
+		printf("code_id : %d ; PM_ENV_ACPI_CPUFREQ ? %d\n" , lcore_id , (env==PM_ENV_ACPI_CPUFREQ ) );
+		printf("code_id : %d ; PM_ENV_PSTATE_CPUFREQ ? %d\n" , lcore_id , (env==PM_ENV_PSTATE_CPUFREQ ) );
+		printf("code_id : %d ; PM_ENV_AMD_PSTATE_CPUFREQ ? %d\n" , lcore_id , (env==PM_ENV_AMD_PSTATE_CPUFREQ ) );
+		printf("code_id : %d ; PM_ENV_CPPC_CPUFREQ ? %d\n" , lcore_id , (env==PM_ENV_CPPC_CPUFREQ ) );
+
 		if (env != PM_ENV_ACPI_CPUFREQ &&
 				env != PM_ENV_PSTATE_CPUFREQ &&
 				env != PM_ENV_AMD_PSTATE_CPUFREQ &&
@@ -2273,6 +2281,9 @@ init_power_library(void)
 				"Only ACPI and PSTATE mode are supported\n");
 			return -1;
 		}
+
+		printf("--- returning from RTE_LCORE_FOREACH on core %d \n", lcore_id);
+
 	}
 
 	if (cpu_resume_latency != -1) {
