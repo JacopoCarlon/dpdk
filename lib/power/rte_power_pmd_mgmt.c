@@ -444,10 +444,11 @@ check_scale(unsigned int lcore)
 	}
 	/* ensure we could initialize the power library */
 	printf("try to initialize power library\n");
-	if (rte_power_init(lcore))
+	if (rte_power_init(lcore)){
 		printf("failed to initialize power library\n");
 		return -EINVAL; // -22 
-
+	}
+		
 	printf("managed to initialize power library, check env new sets\n");
 
 	/* ensure we initialized the correct env */
