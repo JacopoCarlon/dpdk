@@ -24,6 +24,8 @@ RTE_LOG_REGISTER_DEFAULT(rte_power_logtype, INFO);
 int
 cpufreq_check_scaling_driver(const char *driver_name)
 {
+	printf("--- entering cpufreq_check_scaling_driver \n");
+
 	unsigned int lcore_id = 0; /* always check core 0 */
 	char readbuf[PATH_MAX];
 	size_t end_idx;
@@ -36,17 +38,21 @@ cpufreq_check_scaling_driver(const char *driver_name)
 	open_core_sysfs_file(&f, "r", POWER_SYSFILE_SCALING_DRIVER,
 			lcore_id);
 	/* if there's no driver at all, bail out */
-	if (f == NULL)
+	if (f == NULL){
+		printf("--- no driver at all\n");
 		return 0;
-
+	}
+		
 	s = fgets(readbuf, sizeof(readbuf), f);
 	/* don't need it any more */
 	fclose(f);
 
 	/* if we can't read it, consider unsupported */
-	if (s == NULL)
+	if (s == NULL){
+		printf("--- cannot read it\n");
 		return 0;
-
+	}
+		
 	/* when read from sysfs, driver name has an extra newline at the end */
 	end_idx = strnlen(readbuf, sizeof(readbuf));
 	if (end_idx > 0 && readbuf[end_idx - 1] == '\n') {
@@ -55,14 +61,17 @@ cpufreq_check_scaling_driver(const char *driver_name)
 	}
 
 	/* does the driver name match? */
-	if (strncmp(readbuf, driver_name, sizeof(readbuf)) != 0)
+	if (strncmp(readbuf, driver_name, sizeof(readbuf)) != 0){
+		printf("comparing %s and %s , they are not the same it seems \n", readbuf, driver_name);
 		return 0;
-
+	}
+		
 	/*
 	 * We might have a situation where the driver is supported, but we don't
 	 * have permissions to do frequency scaling. This error should not be
 	 * handled here, so consider the system to support scaling for now.
 	 */
+	printf("--- arrived here we assume the system supports scaling !!! \n");
 	return 1;
 }
 
