@@ -533,6 +533,7 @@ fail:
 int
 power_pstate_cpufreq_check_supported(void)
 {
+	printf("calling cpufreq_check_scaling_driver on POWER_PSTATE_DRIVER\n");
 	return cpufreq_check_scaling_driver(POWER_PSTATE_DRIVER);
 }
 

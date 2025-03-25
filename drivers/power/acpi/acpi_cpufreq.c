@@ -227,6 +227,7 @@ err:
 int
 power_acpi_cpufreq_check_supported(void)
 {
+	printf("calling cpufreq_check_scaling_driver on POWER_ACPI_DRIVER\n");
 	return cpufreq_check_scaling_driver(POWER_ACPI_DRIVER);
 }
 
