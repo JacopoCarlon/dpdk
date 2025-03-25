@@ -2850,12 +2850,12 @@ main(int argc, char **argv)
 					rte_exit(EXIT_FAILURE,
 						"Error setting scaling freq max: err=%d, lcore %d\n",
 							ret, lcore_id);
-				printf("finished rte_power_pmd_mgmt_set_scaling_freq_max call, with ret : %d\n", ret);
+				printf("--- finished rte_power_pmd_mgmt_set_scaling_freq_max call, with ret : %d\n", ret);
 
 				ret = rte_power_ethdev_pmgmt_queue_enable(
 						lcore_id, portid, queueid,
 						pmgmt_type);
-				printf("finished rte_power_ethdev_pmgmt_queue_enable call, with ret : %d\n", ret);
+				printf("--- finished rte_power_ethdev_pmgmt_queue_enable call, with ret : %d\n", ret);
 				if (ret < 0)
 					rte_exit(EXIT_FAILURE,
 						"rte_power_ethdev_pmgmt_queue_enable: err=%d, port=%d\n",

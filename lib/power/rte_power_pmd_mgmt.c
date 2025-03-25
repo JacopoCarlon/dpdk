@@ -432,8 +432,10 @@ static int
 check_scale(unsigned int lcore)
 {
 	enum power_management_env env;
+	printf("--- start of check_scale on lcore : %d \n", lcore);
 
 	/* only PSTATE, AMD-PSTATE, ACPI and CPPC modes are supported */
+	// see rte_power_cpufreq.c -> rte_power_check_enc_supported(enum )
 	if (!rte_power_check_env_supported(PM_ENV_ACPI_CPUFREQ) &&
 			!rte_power_check_env_supported(PM_ENV_PSTATE_CPUFREQ) &&
 			!rte_power_check_env_supported(PM_ENV_AMD_PSTATE_CPUFREQ) &&
@@ -521,20 +523,20 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 
 	if (queue_id >= RTE_MAX_QUEUES_PER_PORT || lcore_id >= RTE_MAX_LCORE) {
 		ret = -EINVAL;
-		printf("returning from queue_id||lcore_id with ret:%d\n",ret);
+		printf("--- returning from queue_id||lcore_id with ret:%d\n",ret);
 		goto end;
 	}
 
 	if (rte_eth_dev_info_get(port_id, &info) < 0) {
 		ret = -EINVAL;
-		printf("returning from cfg_queues_stopped with ret:%d\n",ret);
+		printf("--- returning from cfg_queues_stopped with ret:%d\n",ret);
 		goto end;
 	}
 
 	/* check if queue id is valid */
 	if (queue_id >= info.nb_rx_queues) {
 		ret = -EINVAL;
-		printf("returning from queue_id.invalid with ret:%d\n",ret);
+		printf("--- returning from queue_id.invalid with ret:%d\n",ret);
 		goto end;
 	}
 
@@ -543,7 +545,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 	if (ret != 1) {
 		/* error means invalid queue, 0 means queue wasn't stopped */
 		ret = ret < 0 ? -EINVAL : -EBUSY;
-		printf("returning from (this)queue_stopped with ret:%d\n",ret);
+		printf("--- returning from (this)queue_stopped with ret:%d\n",ret);
 		goto end;
 	}
 
@@ -592,10 +594,10 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 			break;
 		/* check if we can add a new queue */
 		printf("!!! RTE_POWER_MGMT_TYPE_SCALE after break ! --- \n");
-		ret = check_scale(lcore_id);
+		ret = check_scale(lcore_id); // see this file about row 430
 		if (ret < 0){
 			// here gets -95
-			printf("returning from RTE_POWER_MGMT_TYPE_SCALE with ret:%d\n",ret);
+			printf("--- returning from RTE_POWER_MGMT_TYPE_SCALE with ret:%d\n",ret);
 			goto end;
 		}
 		break;

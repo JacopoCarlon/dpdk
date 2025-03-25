@@ -49,17 +49,19 @@ int
 rte_power_check_env_supported(enum power_management_env env)
 {
 	struct rte_power_cpufreq_ops *ops;
+	printf("--- entering rte_power_check_env_supported against env : %d \n", enum);
 	if (env >= RTE_DIM(power_env_str)){
 		printf("return 0 on env>= RTE_DIM\n");
 		return 0;
 	}
 		
 	RTE_TAILQ_FOREACH(ops, &cpufreq_ops_list, next)
-		if (strncmp(ops->name, power_env_str[env],
-				RTE_POWER_DRIVER_NAMESZ) == 0)
+		if (strncmp(ops->name, power_env_str[env], RTE_POWER_DRIVER_NAMESZ) == 0){
+			printf("testing rte_tailq_foreqch : comparing %s and %s gotten ==0, will return %d !!! \n", ops->name, power_env_str[env], ops->check_env_support());
 			return ops->check_env_support();
+		}
 
-	printf("return 0 on end of rte_power_check_env_supported %d\n", env);
+	printf("--- return 0 on end of rte_power_check_env_supported %d\n", env);
 	return 0;
 }
 
