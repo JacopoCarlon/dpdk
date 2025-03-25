@@ -49,10 +49,11 @@ int
 rte_power_check_env_supported(enum power_management_env env)
 {
 	struct rte_power_cpufreq_ops *ops;
-	if (env >= RTE_DIM(power_env_str))
+	if (env >= RTE_DIM(power_env_str)){
 		printf("return 0 on env>= RTE_DIM\n");
 		return 0;
-
+	}
+		
 	RTE_TAILQ_FOREACH(ops, &cpufreq_ops_list, next)
 		if (strncmp(ops->name, power_env_str[env],
 				RTE_POWER_DRIVER_NAMESZ) == 0)
