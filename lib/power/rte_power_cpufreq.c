@@ -28,6 +28,7 @@ const char *power_env_str[] = {
 int
 rte_power_register_cpufreq_ops(struct rte_power_cpufreq_ops *driver_ops)
 {
+	printf("--- inizio rte_power_register_cpufreq_ops\n");
 	if (!driver_ops->init || !driver_ops->exit ||
 		!driver_ops->check_env_support || !driver_ops->get_avail_freqs ||
 		!driver_ops->get_freq || !driver_ops->set_freq ||
@@ -40,7 +41,7 @@ rte_power_register_cpufreq_ops(struct rte_power_cpufreq_ops *driver_ops)
 	}
 
 	TAILQ_INSERT_TAIL(&cpufreq_ops_list, driver_ops, next);
-
+	printf("--- done tail insert rte_power_register_cpufreq_ops\n");
 	return 0;
 }
 
