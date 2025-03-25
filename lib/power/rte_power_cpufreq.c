@@ -41,7 +41,7 @@ rte_power_register_cpufreq_ops(struct rte_power_cpufreq_ops *driver_ops)
 	}
 
 	TAILQ_INSERT_TAIL(&cpufreq_ops_list, driver_ops, next);
-	printf("--- done tail insert rte_power_register_cpufreq_ops\n");
+	printf("--- rte_power_cpufreq.c : done tail insert rte_power_register_cpufreq_ops, in particoular envsupport() is : %d\n", driver_ops->check_env_support() );
 	return 0;
 }
 
