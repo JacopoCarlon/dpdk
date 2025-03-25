@@ -49,7 +49,7 @@ int
 rte_power_check_env_supported(enum power_management_env env)
 {
 	struct rte_power_cpufreq_ops *ops;
-	printf("--- entering rte_power_check_env_supported against env : %d \n", enum);
+	printf("--- entering rte_power_check_env_supported against env : %d \n", env);
 	if (env >= RTE_DIM(power_env_str)){
 		printf("return 0 on env>= RTE_DIM\n");
 		return 0;
