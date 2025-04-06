@@ -937,8 +937,11 @@ static int main_intr_loop(__rte_unused void *dummy)
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, L3FWD_POWER, "lcore %u has nothing to do\n",
 				lcore_id);
+		printf("returning 0 from main_intr_loop\n");
 		return 0;
 	}
+
+	printf("--- about to enter main interrupt loop !");
 
 	RTE_LOG(INFO, L3FWD_POWER, "entering main interrupt loop on lcore %u\n",
 			lcore_id);
@@ -1104,6 +1107,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, L3FWD_POWER, "lcore %u has nothing to do\n",
 			lcore_id);
+		printf("returning 0 from main_telemetry_loop\n");
 		return 0;
 	}
 
@@ -1224,6 +1228,7 @@ main_legacy_loop(__rte_unused void *dummy)
 
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, L3FWD_POWER, "lcore %u has nothing to do\n", lcore_id);
+		printf("returning 0 from main_legacy_loop\n");
 		return 0;
 	}
 
@@ -2427,6 +2432,7 @@ handle_app_stats(const char *cmd __rte_unused,
 static void
 telemetry_setup_timer(void)
 {
+	printf("--- !!! setup telemetry timer !!! \n");
 	int lcore_id = rte_lcore_id();
 	uint64_t hz = rte_get_timer_hz();
 	uint64_t ticks;
