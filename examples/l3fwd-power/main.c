@@ -686,6 +686,15 @@ add_cb_parse_ptype(uint16_t portid, uint16_t queueid)
 	return -1;
 }
 
+
+
+
+// some nice hardcoding
+static struct rte_ether_addr dst_macs[RTE_MAX_ETHPORTS] = {
+    [0] = {.addr_bytes = {0x68, 0x05, 0xca, 0x95, 0xfa, 0x64}},  // Server B port0 MAC
+    [1] = {.addr_bytes = {0x68, 0x05, 0xca, 0x95, 0xfa, 0x65}},  // Server B port1 MAC
+};
+
 static inline void
 l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 				struct lcore_conf *qconf)
@@ -718,10 +727,12 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 			dst_port = portid;
 
 		/* 02:00:00:00:00:xx */
-		d_addr_bytes = &eth_hdr->dst_addr.addr_bytes[0];
-		*((uint64_t *)d_addr_bytes) =
-			0x000000000002 + ((uint64_t)dst_port << 40);
-
+		/*
+			d_addr_bytes = &eth_hdr->dst_addr.addr_bytes[0];
+			*((uint64_t *)d_addr_bytes) = 0x000000000002 + ((uint64_t)dst_port << 40);
+		*/
+		rte_ether_addr_copy(&dst_macs[dst_port], &eth_hdr->dst_addr);
+		
 #ifdef DO_RFC_1812_CHECKS
 		/* Update time to live and header checksum */
 		--(ipv4_hdr->time_to_live);
@@ -750,9 +761,11 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 			dst_port = portid;
 
 		/* 02:00:00:00:00:xx */
-		d_addr_bytes = &eth_hdr->dst_addr.addr_bytes[0];
-		*((uint64_t *)d_addr_bytes) =
-			0x000000000002 + ((uint64_t)dst_port << 40);
+		/*
+			d_addr_bytes = &eth_hdr->dst_addr.addr_bytes[0];
+			*((uint64_t *)d_addr_bytes) = 0x000000000002 + ((uint64_t)dst_port << 40);
+		*/
+		rte_ether_addr_copy(&dst_macs[dst_port], &eth_hdr->dst_addr);
 
 		/* src addr */
 		rte_ether_addr_copy(&ports_eth_addr[dst_port],
