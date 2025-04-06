@@ -1124,7 +1124,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 	printf("_done for, entering while \n");
 	while (!is_done()) {
 
-		printf("___ drain tx queue\n");
+		// printf("___ drain tx queue\n"); // this happens !
 		cur_tsc = rte_rdtsc();
 		/*
 		 * TX burst queue drain
@@ -1144,7 +1144,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 		 * Read packet from RX queues
 		 */
 
-		printf("___ receive from rx queue\n");
+		// printf("___ receive from rx queue\n"); // this happens !
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			portid = rx_queue->port_id;
@@ -1200,7 +1200,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 			rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
 		}
 
-		printf("___ cycling in while!\n");
+		// printf("___ cycling in while!\n"); // this happens ! 
 	}
 
 	return 0;
