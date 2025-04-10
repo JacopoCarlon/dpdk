@@ -751,7 +751,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) {
 		/* Handle IPv4 headers.*/
-		print("entered ipv4 management\n");
+		printf("entered ipv4 management\n");
 		ipv4_hdr =
 			rte_pktmbuf_mtod_offset(m, struct rte_ipv4_hdr *,
 						sizeof(struct rte_ether_hdr));
@@ -788,7 +788,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		/* src addr */
 		rte_ether_addr_copy(&ports_eth_addr[dst_port],
 				&eth_hdr->src_addr);
-		printf("sending m:%s, to port %d\n", m, dst_port);
+		printf("sending to port %d\n", dst_port);
 		send_single_packet(m, dst_port);
 	} else if (RTE_ETH_IS_IPV6_HDR(m->packet_type)) {
 		/* Handle IPv6 headers.*/
