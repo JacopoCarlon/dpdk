@@ -681,7 +681,7 @@ get_ipv4_dst_port(struct rte_ipv4_hdr *ipv4_hdr, uint16_t portid,
 		lookup_struct_t *ipv4_l3fwd_lookup_struct)
 {
 	uint32_t next_hop;
-	printf("calling rte_lpm_lookup ");
+	printf("> calling rte_lpm_lookup ");
 	return ((rte_lpm_lookup(ipv4_l3fwd_lookup_struct,
 			rte_be_to_cpu_32(ipv4_hdr->dst_addr), &next_hop) == 0)?
 			next_hop : portid);
@@ -743,7 +743,7 @@ static inline void
 l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 				struct lcore_conf *qconf)
 {
-	printf("entered l3fwd_simple_forward\n");
+	printf("--- entered l3fwd_simple_forward\n");
 	struct rte_ether_hdr *eth_hdr;
 	struct rte_ipv4_hdr *ipv4_hdr;
 	uint16_t dst_port;
@@ -774,15 +774,18 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 					printf("defaulting to returning whence it came\n");
 				}
 		
-		printf("chosen out port : %d\n", dst_port);
 		/* 02:00:00:00:00:xx */
 		/*
 			void *d_addr_bytes;
 			d_addr_bytes = &eth_hdr->dst_addr.addr_bytes[0];
 			*((uint64_t *)d_addr_bytes) = 0x000000000002 + ((uint64_t)dst_port << 40);
 		*/
+
+		// this is HARDCODING 0->1
+		dst_port = 1;
+
 		rte_ether_addr_copy(&dst_macs[dst_port], &eth_hdr->dst_addr);
-		printf("done rte_ether_addr_copy \n");
+		//printf("done rte_ether_addr_copy \n");
 #ifdef DO_RFC_1812_CHECKS
 		/* Update time to live and header checksum */
 		--(ipv4_hdr->time_to_live);
@@ -792,10 +795,10 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		/* src addr */
 		rte_ether_addr_copy(&ports_eth_addr[dst_port],
 				&eth_hdr->src_addr);
-		printf("sending to port %d\n", dst_port);
-		
+		// printf("sending to port %d\n", dst_port);
+
 		send_single_packet(m, dst_port);
-		printf("done send_single_packet \n");
+		printf("done send_single_packet to port %d\n", dst_port);
 
 	} else if (RTE_ETH_IS_IPV6_HDR(m->packet_type)) {
 		/* Handle IPv6 headers.*/
