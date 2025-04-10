@@ -352,7 +352,7 @@ struct ipv4_l3fwd_route {
 	uint8_t  if_out;
 };
 
-/*
+
 static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 	{RTE_IPV4(1,1,1,0), 24, 0},
 	{RTE_IPV4(2,1,1,0), 24, 1},
@@ -363,9 +363,10 @@ static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 	{RTE_IPV4(7,1,1,0), 24, 6},
 	{RTE_IPV4(8,1,1,0), 24, 7},
 };
-*/
+
 
 // LPM route table ip 
+/*
 struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
     // Route Server B's source IP (1.1.1.100) back to Server B's Port1 via A1
     {RTE_IPV4(1, 1, 1, 100), 32, 0},  // 
@@ -374,6 +375,13 @@ struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
     {RTE_IPV4(2, 1, 1, 1),   32, 1},  // 
 };
 
+//	//	 Address:68:05:CA:95:F8:EC, Allocated mbuf pool on socket 0
+//	//	--- populating the lpm table !!!
+//	//	LPM: Adding route 0x01010164 / 32 (0)
+//	//	LPM: Adding route 0x02010101 / 32 (1)
+//	//	txq=0,0,0 txq=2,1,0 
+
+*/
 
 #define IPV4_L3FWD_LPM_MAX_RULES     1024
 
