@@ -367,14 +367,12 @@ static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 
 struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
     // Route Server B's source IP (1.1.1.100) back to Server B's Port1 via A1
-    {RTE_IPV4(1, 1, 1, 100), 32, 0},  // Destination IP -> Port1 (A1)
+    {RTE_IPV4(1, 1, 1, 100), 32, 1},  // 
     
     // Route destination IP (2.1.1.1) to Server A's Port1 (A1)
-    {RTE_IPV4(2, 1, 1, 1),    32, 1},  // Destination IP -> Port1 (A1)
-    
-    // Default route (optional)
-    {RTE_IPV4(0, 0, 0, 0),    0,  1}   
+    {RTE_IPV4(2, 1, 1, 1),    32, 0},  // 
 };
+
 
 #define IPV4_L3FWD_LPM_MAX_RULES     1024
 
@@ -2115,7 +2113,7 @@ setup_lpm(int socketid)
 				" on socket %d\n", socketid);
 
 	/* populate the LPM table */
-	printf("populating the lpm table !!!\n");
+	printf("--- populating the lpm table !!!\n");
 	for (i = 0; i < RTE_DIM(ipv4_l3fwd_route_array); i++) {
 		ret = rte_lpm_add(ipv4_l3fwd_lookup_struct[socketid],
 			ipv4_l3fwd_route_array[i].ip,
