@@ -353,6 +353,21 @@ struct ipv4_l3fwd_route {
 };
 
 
+
+// alternative 1 :
+
+//	//	Address:68:05:CA:95:F8:EC, Allocated mbuf pool on socket 0
+//	//	--- populating the lpm table !!!
+//	//	LPM: Adding route 0x01010100 / 24 (0)
+//	//	LPM: Adding route 0x02010100 / 24 (1)
+//	//	LPM: Adding route 0x03010100 / 24 (2)
+//	//	LPM: Adding route 0x04010100 / 24 (3)
+//	//	LPM: Adding route 0x05010100 / 24 (4)
+//	//	LPM: Adding route 0x06010100 / 24 (5)
+//	//	LPM: Adding route 0x07010100 / 24 (6)
+//	//	LPM: Adding route 0x08010100 / 24 (7)
+//	//	txq=0,0,0 txq=2,1,0 
+
 static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 	{RTE_IPV4(1,1,1,0), 24, 0},
 	{RTE_IPV4(2,1,1,0), 24, 1},
@@ -365,7 +380,7 @@ static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 };
 
 
-// LPM route table ip 
+// alternative 2 :
 /*
 struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
     // Route Server B's source IP (1.1.1.100) back to Server B's Port1 via A1
