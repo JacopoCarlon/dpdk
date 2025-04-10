@@ -774,7 +774,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 					printf("defaulting to returning whence it came\n");
 				}
 		
-
+		printf("chosen out port : %d\n", dst_port);
 		/* 02:00:00:00:00:xx */
 		/*
 			void *d_addr_bytes;
@@ -782,7 +782,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 			*((uint64_t *)d_addr_bytes) = 0x000000000002 + ((uint64_t)dst_port << 40);
 		*/
 		rte_ether_addr_copy(&dst_macs[dst_port], &eth_hdr->dst_addr);
-		
+		printf("done rte_ether_addr_copy \n");
 #ifdef DO_RFC_1812_CHECKS
 		/* Update time to live and header checksum */
 		--(ipv4_hdr->time_to_live);
@@ -793,7 +793,10 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		rte_ether_addr_copy(&ports_eth_addr[dst_port],
 				&eth_hdr->src_addr);
 		printf("sending to port %d\n", dst_port);
+		
 		send_single_packet(m, dst_port);
+		printf("done send_single_packet \n");
+
 	} else if (RTE_ETH_IS_IPV6_HDR(m->packet_type)) {
 		/* Handle IPv6 headers.*/
 		printf("is ipv6 fwd \n");
