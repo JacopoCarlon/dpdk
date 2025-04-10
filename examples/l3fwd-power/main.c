@@ -742,6 +742,7 @@ static inline void
 l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 				struct lcore_conf *qconf)
 {
+	printf("entered l3fwd_simple_forward\n");
 	struct rte_ether_hdr *eth_hdr;
 	struct rte_ipv4_hdr *ipv4_hdr;
 	uint16_t dst_port;
@@ -750,6 +751,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) {
 		/* Handle IPv4 headers.*/
+		print("entered ipv4 management\n");
 		ipv4_hdr =
 			rte_pktmbuf_mtod_offset(m, struct rte_ipv4_hdr *,
 						sizeof(struct rte_ether_hdr));
@@ -758,6 +760,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		/* Check to make sure the packet is valid (RFC1812) */
 		if (is_valid_ipv4_pkt(ipv4_hdr, m->pkt_len) < 0) {
 			rte_pktmbuf_free(m);
+			printf("is_valid_ipv4_pkt failed\n");
 			return;
 		}
 #endif
@@ -785,9 +788,11 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		/* src addr */
 		rte_ether_addr_copy(&ports_eth_addr[dst_port],
 				&eth_hdr->src_addr);
+		printf("sending m:%s, to port %d\n", m, dst_port);
 		send_single_packet(m, dst_port);
 	} else if (RTE_ETH_IS_IPV6_HDR(m->packet_type)) {
 		/* Handle IPv6 headers.*/
+		printf("is ipv6 fwd \n");
 #if (APP_LOOKUP_METHOD == APP_LOOKUP_EXACT_MATCH)
 		struct rte_ipv6_hdr *ipv6_hdr;
 
