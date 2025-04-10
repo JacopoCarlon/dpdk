@@ -716,7 +716,6 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 {
 	struct rte_ether_hdr *eth_hdr;
 	struct rte_ipv4_hdr *ipv4_hdr;
-	void *d_addr_bytes;
 	uint16_t dst_port;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
@@ -743,6 +742,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 
 		/* 02:00:00:00:00:xx */
 		/*
+			void *d_addr_bytes;
 			d_addr_bytes = &eth_hdr->dst_addr.addr_bytes[0];
 			*((uint64_t *)d_addr_bytes) = 0x000000000002 + ((uint64_t)dst_port << 40);
 		*/
