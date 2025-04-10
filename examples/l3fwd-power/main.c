@@ -366,8 +366,14 @@ static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 */
 
 struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
-    {RTE_IPV4(1,1,1,100), 32, 1},  // Route Server B's src IP to Port1
-    {RTE_IPV4(2,1,1,1), 32, 0}     // Route Server A's dst IP to Port0
+    // Route Server B's source IP (1.1.1.100) back to Server B's Port1 via A1
+    {RTE_IPV4(1, 1, 1, 100), 32, 1},  // Destination IP -> Port1 (A1)
+    
+    // Route destination IP (2.1.1.1) to Server A's Port1 (A1)
+    {RTE_IPV4(2, 1, 1, 1),    32, 1},  // Destination IP -> Port1 (A1)
+    
+    // Default route (optional)
+    {RTE_IPV4(0, 0, 0, 0),    0,  1}   
 };
 
 #define IPV4_L3FWD_LPM_MAX_RULES     1024
