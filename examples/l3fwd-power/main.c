@@ -365,12 +365,13 @@ static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 };
 */
 
+// LPM route table ip 
 struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
     // Route Server B's source IP (1.1.1.100) back to Server B's Port1 via A1
-    {RTE_IPV4(1, 1, 1, 100), 32, 1},  // 
+    {RTE_IPV4(1, 1, 1, 100), 32, 0},  // 
     
     // Route destination IP (2.1.1.1) to Server A's Port1 (A1)
-    {RTE_IPV4(2, 1, 1, 1),    32, 0},  // 
+    {RTE_IPV4(2, 1, 1, 1),   32, 1},  // 
 };
 
 
