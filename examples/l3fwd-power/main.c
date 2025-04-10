@@ -782,7 +782,8 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		*/
 
 		// this is HARDCODING 0->1
-		dst_port = 1;
+		// let's try to not hardcode it plz
+		// dst_port = 1;
 
 		rte_ether_addr_copy(&dst_macs[dst_port], &eth_hdr->dst_addr);
 		//printf("done rte_ether_addr_copy \n");
