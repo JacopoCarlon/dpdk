@@ -134,6 +134,14 @@ static uint16_t nb_txd = TX_DESC_DEFAULT;
 /* ethernet addresses of ports */
 static struct rte_ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];
 
+
+// Update src MACs to match Server A's actual ports
+static struct rte_ether_addr ports_eth_addr[RTE_MAX_ETHPORTS] = {
+    [0] = {{0x68, 0x05, 0xca, 0x95, 0xf8, 0xec}},  // Server A Port 0 MAC
+    [1] = {{0x68, 0x05, 0xca, 0x95, 0xf8, 0xed}},  // Server A Port 1 MAC
+};
+
+
 /* ethernet addresses of ports */
 static rte_spinlock_t locks[RTE_MAX_ETHPORTS];
 
