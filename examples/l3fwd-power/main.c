@@ -352,6 +352,7 @@ struct ipv4_l3fwd_route {
 	uint8_t  if_out;
 };
 
+/*
 static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 	{RTE_IPV4(1,1,1,0), 24, 0},
 	{RTE_IPV4(2,1,1,0), 24, 1},
@@ -361,6 +362,12 @@ static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 	{RTE_IPV4(6,1,1,0), 24, 5},
 	{RTE_IPV4(7,1,1,0), 24, 6},
 	{RTE_IPV4(8,1,1,0), 24, 7},
+};
+*/
+
+struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
+    {RTE_IPV4(1,1,1,100), 32, 1},  // Route Server B's src IP to Port1
+    {RTE_IPV4(2,1,1,1), 32, 0}     // Route Server A's dst IP to Port0
 };
 
 #define IPV4_L3FWD_LPM_MAX_RULES     1024
@@ -750,7 +757,6 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		/* src addr */
 		rte_ether_addr_copy(&ports_eth_addr[dst_port],
 				&eth_hdr->src_addr);
-
 		send_single_packet(m, dst_port);
 	} else if (RTE_ETH_IS_IPV6_HDR(m->packet_type)) {
 		/* Handle IPv6 headers.*/
@@ -2103,6 +2109,7 @@ setup_lpm(int socketid)
 				" on socket %d\n", socketid);
 
 	/* populate the LPM table */
+	printf("populating the lpm table !!!\n");
 	for (i = 0; i < RTE_DIM(ipv4_l3fwd_route_array); i++) {
 		ret = rte_lpm_add(ipv4_l3fwd_lookup_struct[socketid],
 			ipv4_l3fwd_route_array[i].ip,
