@@ -368,6 +368,7 @@ struct ipv4_l3fwd_route {
 //	//	LPM: Adding route 0x08010100 / 24 (7)
 //	//	txq=0,0,0 txq=2,1,0 
 
+// used to populate in setup_lpm the ipv4_l3fwd_lookup_struct
 static struct ipv4_l3fwd_route ipv4_l3fwd_route_array[] = {
 	{RTE_IPV4(1,1,1,0), 24, 0},
 	{RTE_IPV4(2,1,1,0), 24, 1},
@@ -680,7 +681,7 @@ get_ipv4_dst_port(struct rte_ipv4_hdr *ipv4_hdr, uint16_t portid,
 		lookup_struct_t *ipv4_l3fwd_lookup_struct)
 {
 	uint32_t next_hop;
-
+	printf("calling rte_lpm_lookup ");
 	return ((rte_lpm_lookup(ipv4_l3fwd_lookup_struct,
 			rte_be_to_cpu_32(ipv4_hdr->dst_addr), &next_hop) == 0)?
 			next_hop : portid);
@@ -751,7 +752,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 
 	if (RTE_ETH_IS_IPV4_HDR(m->packet_type)) {
 		/* Handle IPv4 headers.*/
-		printf("entered ipv4 management\n");
+		//printf("entered ipv4 management\n");
 		ipv4_hdr =
 			rte_pktmbuf_mtod_offset(m, struct rte_ipv4_hdr *,
 						sizeof(struct rte_ether_hdr));
@@ -760,7 +761,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		/* Check to make sure the packet is valid (RFC1812) */
 		if (is_valid_ipv4_pkt(ipv4_hdr, m->pkt_len) < 0) {
 			rte_pktmbuf_free(m);
-			printf("is_valid_ipv4_pkt failed\n");
+			//printf("is_valid_ipv4_pkt failed\n");
 			return;
 		}
 #endif
@@ -768,8 +769,11 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		dst_port = get_ipv4_dst_port(ipv4_hdr, portid,
 					qconf->ipv4_lookup_struct);
 		if (dst_port >= RTE_MAX_ETHPORTS ||
-				(enabled_port_mask & 1 << dst_port) == 0)
-			dst_port = portid;
+				(enabled_port_mask & 1 << dst_port) == 0){
+					dst_port = portid;
+					printf("defaulting to returning whence it came\n");
+				}
+		
 
 		/* 02:00:00:00:00:xx */
 		/*
