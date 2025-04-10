@@ -743,7 +743,7 @@ static inline void
 l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 				struct lcore_conf *qconf)
 {
-	printf("--- entered l3fwd_simple_forward\n");
+	//printf("--- entered l3fwd_simple_forward\n");
 	struct rte_ether_hdr *eth_hdr;
 	struct rte_ipv4_hdr *ipv4_hdr;
 	uint16_t dst_port;
@@ -798,7 +798,7 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		// printf("sending to port %d\n", dst_port);
 
 		send_single_packet(m, dst_port);
-		printf("done send_single_packet to port %d\n", dst_port);
+		//printf("done send_single_packet to port %d\n", dst_port);
 
 	} else if (RTE_ETH_IS_IPV6_HDR(m->packet_type)) {
 		/* Handle IPv6 headers.*/
