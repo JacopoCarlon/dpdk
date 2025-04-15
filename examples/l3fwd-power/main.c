@@ -997,6 +997,8 @@ static int main_intr_loop(__rte_unused void *dummy)
 	uint32_t lcore_idle_hint = 0;
 	int intr_en = 0;
 
+	printf("--- Entered main intr loop !!! \n");
+
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 				   US_PER_S * BURST_TX_DRAIN_US;
 
@@ -2670,12 +2672,15 @@ main(int argc, char **argv)
 	baseline_enabled = false;
 
 	/* parse application arguments (after the EAL ones) */
+	printf("... ... ... -> parsing application parameters \n");
 	ret = parse_args(argc, argv);
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "Invalid L3FWD parameters\n");
 
 	if (app_mode == APP_MODE_DEFAULT)
 		app_mode = autodetect_mode();
+
+	printf("\n... ... ... ... Selected operation mode: %s\n\n", mode_to_str(app_mode)) ;
 
 	RTE_LOG(INFO, L3FWD_POWER, "Selected operation mode: %s\n",
 			mode_to_str(app_mode));
@@ -2914,6 +2919,7 @@ main(int argc, char **argv)
 
 			if (app_mode == APP_MODE_PMD_MGMT && !baseline_enabled) {
 				/* Set power_pmd_mgmt configs passed by user */
+				printf("working on APP_MODE_PMD_MGMT \n");
 				rte_power_pmd_mgmt_set_emptypoll_max(max_empty_polls);
 				ret = rte_power_pmd_mgmt_set_pause_duration(pause_duration);
 				if (ret < 0)
@@ -2986,6 +2992,8 @@ main(int argc, char **argv)
 	}
 
 	check_all_ports_link_status(enabled_port_mask);
+
+	printf("launching specific main \n");
 
 	/* launch per-lcore init on every lcore */
 	if (app_mode == APP_MODE_LEGACY) {

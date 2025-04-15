@@ -28,7 +28,7 @@ const char *power_env_str[] = {
 int
 rte_power_register_cpufreq_ops(struct rte_power_cpufreq_ops *driver_ops)
 {
-	printf("--- inizio rte_power_register_cpufreq_ops, testing %s\n", driver_ops->name);
+	// printf("--- inizio rte_power_register_cpufreq_ops, testing %s\n", driver_ops->name);
 	if (!driver_ops->init || !driver_ops->exit ||
 		!driver_ops->check_env_support || !driver_ops->get_avail_freqs ||
 		!driver_ops->get_freq || !driver_ops->set_freq ||
@@ -37,13 +37,13 @@ rte_power_register_cpufreq_ops(struct rte_power_cpufreq_ops *driver_ops)
 		!driver_ops->turbo_status || !driver_ops->enable_turbo ||
 		!driver_ops->disable_turbo || !driver_ops->get_caps) {
 		POWER_LOG(ERR, "Missing callbacks while registering cpufreq ops");
-		printf("exiting by -1 : rte_power_register_cpufreq_ops\n");
+		printf("E! rte_power_register_cpufreq_ops exiting by -1 : rte_power_register_cpufreq_ops\n");
 		//printf("this time we exited !, btw <!driver_ops->check_env_support> ? %d \n", !driver_ops->check_env_support);
 		return -1;
 	}
-	printf("--- --- about to call tailq insert tail on %s :\n", driver_ops->name);
+	//printf("--- --- about to call tailq insert tail on %s :\n", driver_ops->name);
 	TAILQ_INSERT_TAIL(&cpufreq_ops_list, driver_ops, next);
-	printf("--- --- --- rte_power_cpufreq.c : done tail insert rte_power_register_cpufreq_ops, in particoular envsupport() is : %d\n", driver_ops->check_env_support() );
+	//printf("--- --- --- rte_power_cpufreq.c : done tail insert rte_power_register_cpufreq_ops, in particoular envsupport() is : %d\n", driver_ops->check_env_support() );
 	return 0;
 }
 

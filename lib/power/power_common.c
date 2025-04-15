@@ -63,7 +63,7 @@ cpufreq_check_scaling_driver(const char *driver_name)
 	}
 
 	/* does the driver name match? */
-	printf("... does driver have a name ?\n");
+	//printf("... does driver have a name ?\n");
 	if (strncmp(readbuf, driver_name, sizeof(readbuf)) != 0){
 		printf("... comparing %s and %s , they are not the same it seems \n", readbuf, driver_name);
 		return 0;
