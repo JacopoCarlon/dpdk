@@ -488,6 +488,7 @@ power_timer_cb(__rte_unused struct rte_timer *tim,
 	 * check whether need to scale down frequency a step if it sleep a lot.
 	 */
 	if (sleep_time_ratio >= SCALING_DOWN_TIME_RATIO_THRESHOLD) {
+		printf("DBG scaling down freq (you sleep too much)\n");
 		rte_power_freq_down(lcore_id);
 	}
 	else if ( (unsigned)(stats[lcore_id].nb_rx_processed /
@@ -496,6 +497,7 @@ power_timer_cb(__rte_unused struct rte_timer *tim,
 		 * scale down a step if average packet per iteration less
 		 * than expectation.
 		 */
+		printf("DBG scaling down freq (not enough packets to need it)\n");
 		rte_power_freq_down(lcore_id);
 	}
 
@@ -1122,14 +1124,17 @@ start_rx:
 					lcore_idle_hint = rx_queue->idle_hint;
 			}
 
-			if (lcore_idle_hint < SUSPEND_THRESHOLD)
+			if (lcore_idle_hint < SUSPEND_THRESHOLD){
 				/**
 				 * execute "pause" instruction to avoid context
 				 * switch which generally take hundred of
 				 * microseconds for short sleep.
 				 */
+				printf("DBG intrO ---> going to sleep for %d microseconds \n", lcore_idle_hint);
 				rte_delay_us(lcore_idle_hint);
+			}
 			else {
+				printf("DBG intrO --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);
 				/* suspend until rx interrupt triggers */
 				if (intr_en) {
 					turn_on_off_intr(qconf, 1);
@@ -1428,7 +1433,7 @@ start_rx:
 					lcore_scaleup_hint =
 						rx_queue->freq_up_hint;
 			}
-
+			printf("DBG legacy --- > about to change frequency, hint is : %d", lcore_scaleup_hint);
 			if (lcore_scaleup_hint == FREQ_HIGHEST) {
 				rte_power_freq_max(lcore_id);
 			} else if (lcore_scaleup_hint == FREQ_HIGHER) {
@@ -1448,14 +1453,17 @@ start_rx:
 					lcore_idle_hint = rx_queue->idle_hint;
 			}
 
-			if (lcore_idle_hint < SUSPEND_THRESHOLD)
+			if (lcore_idle_hint < SUSPEND_THRESHOLD){
 				/**
 				 * execute "pause" instruction to avoid context
 				 * switch which generally take hundred of
 				 * microseconds for short sleep.
 				 */
+				printf("DBG legacy ---> going to sleep for %d microseconds \n", lcore_idle_hint);
 				rte_delay_us(lcore_idle_hint);
+			}
 			else {
+				printf("DBG legacy --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);
 				/* suspend until rx interrupt triggers */
 				if (intr_en) {
 					turn_on_off_intr(qconf, 1);
