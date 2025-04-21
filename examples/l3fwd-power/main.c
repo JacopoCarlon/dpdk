@@ -1433,7 +1433,7 @@ start_rx:
 					lcore_scaleup_hint =
 						rx_queue->freq_up_hint;
 			}
-			printf("DBG legacy --- > about to change frequency, hint is : %d", lcore_scaleup_hint);
+			printf("DBG legacy --- > about to change frequency, hint is : %d\n", lcore_scaleup_hint);
 			if (lcore_scaleup_hint == FREQ_HIGHEST) {
 				rte_power_freq_max(lcore_id);
 			} else if (lcore_scaleup_hint == FREQ_HIGHER) {
