@@ -353,7 +353,8 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 			return nb_rx;
 
 		/* sleep for 1 microsecond, use tpause if we have it */
-		printf("entering\n");
+		
+		// printf("entering rte_power_pause or rte_pause\n");
 		if (global_data.intrinsics_support.power_pause) {
 			const uint64_t cur = rte_rdtsc();
 			const uint64_t wait_tsc =
