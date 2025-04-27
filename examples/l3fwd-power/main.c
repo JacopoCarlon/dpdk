@@ -488,7 +488,7 @@ power_timer_cb(__rte_unused struct rte_timer *tim,
 	 * check whether need to scale down frequency a step if it sleep a lot.
 	 */
 	if (sleep_time_ratio >= SCALING_DOWN_TIME_RATIO_THRESHOLD) {
-		printf("DBG scaling down freq (you sleep too much)\n");
+		//printf("DBG scaling down freq (you sleep too much)\n");
 		rte_power_freq_down(lcore_id);
 	}
 	else if ( (unsigned)(stats[lcore_id].nb_rx_processed /
@@ -497,7 +497,7 @@ power_timer_cb(__rte_unused struct rte_timer *tim,
 		 * scale down a step if average packet per iteration less
 		 * than expectation.
 		 */
-		printf("DBG scaling down freq (not enough packets to need it)\n");
+		//printf("DBG scaling down freq (not enough packets to need it)\n");
 		rte_power_freq_down(lcore_id);
 	}
 
@@ -1130,11 +1130,11 @@ start_rx:
 				 * switch which generally take hundred of
 				 * microseconds for short sleep.
 				 */
-				printf("DBG intrO ---> going to sleep for %d microseconds \n", lcore_idle_hint);
+				//printf("DBG intrO ---> going to sleep for %d microseconds \n", lcore_idle_hint);
 				rte_delay_us(lcore_idle_hint);
 			}
 			else {
-				printf("DBG intrO --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);
+				//printf("DBG intrO --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);
 				/* suspend until rx interrupt triggers */
 				if (intr_en) {
 					turn_on_off_intr(qconf, 1);
@@ -1433,7 +1433,7 @@ start_rx:
 					lcore_scaleup_hint =
 						rx_queue->freq_up_hint;
 			}
-			printf("DBG legacy --- > about to change frequency, hint is : %d\n", lcore_scaleup_hint);
+			//printf("DBG legacy --- > about to change frequency, hint is : %d\n", lcore_scaleup_hint);
 			if (lcore_scaleup_hint == FREQ_HIGHEST) {
 				rte_power_freq_max(lcore_id);
 			} else if (lcore_scaleup_hint == FREQ_HIGHER) {
@@ -1459,11 +1459,11 @@ start_rx:
 				 * switch which generally take hundred of
 				 * microseconds for short sleep.
 				 */
-				printf("DBG legacy ---> going to sleep for %d microseconds \n", lcore_idle_hint);
+				//printf("DBG legacy ---> going to sleep for %d microseconds \n", lcore_idle_hint);
 				rte_delay_us(lcore_idle_hint);
 			}
 			else {
-				printf("DBG legacy --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);
+				//printf("DBG legacy --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);
 				/* suspend until rx interrupt triggers */
 				if (intr_en) {
 					turn_on_off_intr(qconf, 1);
@@ -2930,34 +2930,38 @@ main(int argc, char **argv)
 				printf("working on APP_MODE_PMD_MGMT \n");
 				rte_power_pmd_mgmt_set_emptypoll_max(max_empty_polls);
 				ret = rte_power_pmd_mgmt_set_pause_duration(pause_duration);
-				if (ret < 0)
+				if (ret < 0){
 					rte_exit(EXIT_FAILURE,
 						"Error setting pause_duration: err=%d, lcore=%d\n",
 							ret, lcore_id);
+				}
 
 				ret = rte_power_pmd_mgmt_set_scaling_freq_min(lcore_id,
 						scale_freq_min);
-				if (ret < 0)
+				if (ret < 0){
 					rte_exit(EXIT_FAILURE,
 						"Error setting scaling freq min: err=%d, lcore=%d\n",
 							ret, lcore_id);
+				}
 
 				ret = rte_power_pmd_mgmt_set_scaling_freq_max(lcore_id,
 						scale_freq_max);
-				if (ret < 0)
+				if (ret < 0){
 					rte_exit(EXIT_FAILURE,
 						"Error setting scaling freq max: err=%d, lcore %d\n",
 							ret, lcore_id);
+				}
 				printf("--- finished rte_power_pmd_mgmt_set_scaling_freq_max call, with ret : %d\n", ret);
 
 				ret = rte_power_ethdev_pmgmt_queue_enable(
 						lcore_id, portid, queueid,
 						pmgmt_type);
 				printf("--- finished rte_power_ethdev_pmgmt_queue_enable call, with ret : %d\n", ret);
-				if (ret < 0)
+				if (ret < 0){
 					rte_exit(EXIT_FAILURE,
 						"rte_power_ethdev_pmgmt_queue_enable: err=%d, port=%d\n",
 							ret, portid);
+				}
 
 				printf("End of power library initialization, with ret : %d\n", ret);
 			}

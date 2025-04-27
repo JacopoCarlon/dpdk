@@ -353,6 +353,7 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 			return nb_rx;
 
 		/* sleep for 1 microsecond, use tpause if we have it */
+		printf("entering\n");
 		if (global_data.intrinsics_support.power_pause) {
 			const uint64_t cur = rte_rdtsc();
 			const uint64_t wait_tsc =
@@ -590,8 +591,9 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		clb = clb_scale_freq;
 
 		/* we only have to check this when enabling first queue */
-		if (lcore_cfg->pwr_mgmt_state != PMD_MGMT_DISABLED)
+		if (lcore_cfg->pwr_mgmt_state != PMD_MGMT_DISABLED){
 			break;
+		}
 		/* check if we can add a new queue */
 		printf("!!! RTE_POWER_MGMT_TYPE_SCALE after break ! --- \n");
 		ret = check_scale(lcore_id); // see this file about row 430
@@ -602,9 +604,11 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		}
 		break;
 	case RTE_POWER_MGMT_TYPE_PAUSE:
+		printf("!!! RTE_POWER_MGMT_TYPE_SCALE checking --- \n");
 		/* figure out various time-to-tsc conversions */
-		if (global_data.tsc_per_us == 0)
+		if (global_data.tsc_per_us == 0){
 			calc_tsc();
+		}
 
 		clb = clb_pause;
 		break;
