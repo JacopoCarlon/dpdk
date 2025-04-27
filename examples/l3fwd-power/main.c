@@ -917,9 +917,7 @@ sleep_until_rx_interrupt(int num, int lcore)
 	void *data;
 
 	if (status[lcore].wakeup) {
-		RTE_LOG(INFO, L3FWD_POWER,
-				"lcore %u sleeps until interrupt triggers\n",
-				rte_lcore_id());
+		//RTE_LOG(INFO, L3FWD_POWER, "lcore %u sleeps until interrupt triggers\n", rte_lcore_id());
 	}
 
 	n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, event, num, 10);
@@ -928,10 +926,7 @@ sleep_until_rx_interrupt(int num, int lcore)
 		port_id = ((uintptr_t)data) >> (sizeof(uint16_t) * CHAR_BIT);
 		queue_id = ((uintptr_t)data) &
 			RTE_LEN2MASK((sizeof(uint16_t) * CHAR_BIT), uint16_t);
-		RTE_LOG(INFO, L3FWD_POWER,
-			"lcore %u is waked up from rx interrupt on"
-			" port %d queue %d\n",
-			rte_lcore_id(), port_id, queue_id);
+		//RTE_LOG(INFO, L3FWD_POWER, "lcore %u is waked up from rx interrupt on port %d queue %d\n", rte_lcore_id(), port_id, queue_id);
 	}
 	status[lcore].wakeup = n != 0;
 
