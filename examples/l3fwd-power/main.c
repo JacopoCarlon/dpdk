@@ -1198,7 +1198,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 			"rxqueueid=%" PRIu16 "\n", lcore_id, portid, queueid);
 	}
 
-	printf("_done for, entering while \n");
+	// printf("_done for, entering while \n");
 	while (!is_done()) {
 
 		// printf("___ drain tx queue\n"); // this happens !
