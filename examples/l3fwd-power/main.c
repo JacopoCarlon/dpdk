@@ -916,9 +916,11 @@ sleep_until_rx_interrupt(int num, int lcore)
 	uint16_t queue_id;
 	void *data;
 
+	/*
 	if (status[lcore].wakeup) {
-		//RTE_LOG(INFO, L3FWD_POWER, "lcore %u sleeps until interrupt triggers\n", rte_lcore_id());
+		RTE_LOG(INFO, L3FWD_POWER, "lcore %u sleeps until interrupt triggers\n", rte_lcore_id());
 	}
+	*/
 
 	n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, event, num, 10);
 	for (i = 0; i < n; i++) {
@@ -1130,6 +1132,7 @@ start_rx:
 				 * microseconds for short sleep.
 				 */
 				//printf("DBG intrO ---> going to sleep for %d microseconds \n", lcore_idle_hint);
+				// rte_delay_us == rte_pause == _mm_pause == assembly stuff
 				rte_delay_us(lcore_idle_hint);
 			}
 			else {
@@ -1137,6 +1140,7 @@ start_rx:
 				/* suspend until rx interrupt triggers */
 				if (intr_en) {
 					turn_on_off_intr(qconf, 1);
+					// sleep_until_rx_interrupt == rte_epoll_wait == eal_epoll_wait == esce al primo evento che riceve
 					sleep_until_rx_interrupt(
 							qconf->n_rx_queue,
 							lcore_id);
