@@ -2960,6 +2960,30 @@ main(int argc, char **argv)
 				ret = rte_power_ethdev_pmgmt_queue_enable(
 						lcore_id, portid, queueid,
 						pmgmt_type);
+
+				// !!! setup of clb_pause happens in rte_power_ethdev_pmgmt_queue_enable !!! 
+				// which is : 
+					// static uint16_t
+					//	clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
+					//		struct rte_mbuf **pkts __rte_unused, uint16_t nb_rx,
+					//		uint16_t max_pkts __rte_unused, void *arg)
+				// in path : lib/power/rte_power_pmd_mgmt.c 
+
+				// eventually, the pause does not the use the weird assembly instruction that we discussed,
+				//	the one whose register does not exist in treebeard/cplex, 
+				// but rather uses : rte_pause() -> _mm_pause()
+
+				// which is : 
+					//	extern __inline void __attribute__((__gnu_inline__, __always_inline__, __artificial__))
+					//	_mm_pause (void)
+				// in path : usr/lin/lvm-14/lib/clang/14.0.0/include/ppc_wrappers/xmmintrin.h 
+
+				// btw, interruptOnly uses the same when doing the short pauses, 
+				//	and for long paueses uses ; 
+				// sleep_until_rx_interrupt -> rte_epoll_wait -> eal_epoll_wait 
+				//	 !!! -> esce al primo evento che riceve
+				
+				
 				printf("--- finished rte_power_ethdev_pmgmt_queue_enable call, with ret : %d\n", ret);
 				if (ret < 0){
 					rte_exit(EXIT_FAILURE,

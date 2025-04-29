@@ -354,16 +354,16 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 
 		/* sleep for 1 microsecond, use tpause if we have it */
 		
-		// printf("entering rte_power_pause or rte_pause\n");
+		// printf("!!! --- clb_pause : entering rte_power_pause or rte_pause\n");
 		if (global_data.intrinsics_support.power_pause) {
-			printf("!!! clb_pause -> rte_power_pause - about to execute the weird assembly tpause\n") ;
+			printf("!!! --- clb_pause -> rte_power_pause - about to execute the weird assembly tpause\n") ;
 			const uint64_t cur = rte_rdtsc();
 			const uint64_t wait_tsc =
 					cur + global_data.tsc_per_us * pause_duration;
 			// rte_power_pause + either _tpause(0, timestamp), o la stessa cosa in assmebly
 			rte_power_pause(wait_tsc);
 		} else {
-			printf("!!! clb_pause -> rte_pause which is _mmpause \n ");
+			//	printf("!!! ... clb_pause -> rte_pause which is _mmpause \n ");
 			uint64_t i;
 			for (i = 0; i < global_data.pause_per_us * pause_duration; i++)
 				rte_pause();
