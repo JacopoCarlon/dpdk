@@ -921,8 +921,10 @@ sleep_until_rx_interrupt(int num, int lcore)
 		RTE_LOG(INFO, L3FWD_POWER, "lcore %u sleeps until interrupt triggers\n", rte_lcore_id());
 	}
 	*/
-
+	// the <rte_epoll_wait> is the sleep part !
 	n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, event, num, 10);
+
+	// now this is wake-up ! 
 	for (i = 0; i < n; i++) {
 		data = event[i].epdata.data;
 		port_id = ((uintptr_t)data) >> (sizeof(uint16_t) * CHAR_BIT);

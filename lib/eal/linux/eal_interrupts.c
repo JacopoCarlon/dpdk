@@ -1337,7 +1337,10 @@ eal_epoll_wait(int epfd, struct rte_epoll_event *events,
 	/* Process events in chunks of MAX_ITER_EVNUM */
 
 	while (1) {
+		// epoll_wait is the sleep part
 		rc = epoll_wait(epfd, evs, n, timeout);
+
+		// and this is wake up if received
 		if (likely(rc > 0)) {
 
 			/* epoll_wait has at least one fd ready to read */
