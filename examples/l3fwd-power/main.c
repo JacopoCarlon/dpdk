@@ -48,12 +48,36 @@
 #include <rte_power_pmd_mgmt.h>
 #include <rte_power_uncore.h>
 #include <rte_power_qos.h>
+#include <rte_epoll.h>			// for J hybrid
 
 #include "perf_core.h"
 #include "main.h"
 
 RTE_LOG_REGISTER(l3fwd_power_logtype, l3fwd.power, INFO);
 #define RTE_LOGTYPE_L3FWD_POWER l3fwd_power_logtype
+
+// --------------------------------------------------------------------
+// J : on-off phase recognition structures
+#define MAX_INTERRUPT_TIMEOUT_US 800  	// 1ms max interrupt sleep
+#define GRACE_POLL_COUNT 10           	// Number of quick polls after wakeup
+#define GRACE_POLL_INTERVAL_US 1      	// 10μs between grace polls
+#define MIN_CONS_EMPTY_FOR_INTR 300    	// Fallback to interrupt after # empty polls
+
+struct traffic_state {
+    uint64_t avg_on_duration;
+    uint64_t avg_off_duration;
+    uint64_t phase_start_tsc;
+    bool in_on_phase;
+    uint32_t consecutive_empty;
+    uint64_t suggested_sleep_us;
+    uint64_t last_packet_tsc;
+};
+static struct traffic_state tstate;
+static rte_spinlock_t tstate_lock;
+
+
+// --------------------------------------------------------------------
+
 
 #define MAX_PKT_BURST 32
 
@@ -987,8 +1011,97 @@ static int event_register(struct lcore_conf *qconf)
 
 	return 0;
 }
-
 /* Main processing loop. 8< */
+
+// --------------------------------------------------------------------
+
+
+/* Modified sleep function with timeout */
+static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
+{
+    struct rte_epoll_event events[num];
+    int n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, events, num, timeout_us);
+    
+    uint64_t wake_tsc = rte_get_tsc_cycles();
+    uint16_t port_id, queue_id;
+    void *data;
+    
+    for (int i = 0; i < n; i++) {
+        data = events[i].epdata.data;
+        port_id = ((uintptr_t)data) >> (sizeof(uint16_t) * CHAR_BIT);
+        queue_id = ((uintptr_t)data) & 
+                  RTE_LEN2MASK((sizeof(uint16_t) * CHAR_BIT), uint16_t);
+        
+        RTE_LOG(INFO, L3FWD_POWER, "Woke up from interrupt on port %d queue %d\n",
+                port_id, queue_id);
+    }
+    
+    return n;
+}
+
+
+
+
+
+
+// J : function to dynamically understand if we are in a mostly on or mostly off phase 
+//	(since all is discrete, we either are on or off tertium non datur)
+static void update_traffic_state(uint64_t current_tsc, bool packet_received)
+{
+    rte_spinlock_lock(&tstate_lock);
+    
+    const uint64_t tsc_hz = rte_get_tsc_hz();
+    const uint64_t time_since_last = current_tsc - tstate.last_packet_tsc;
+    
+    if (packet_received) {
+        if (!tstate.in_on_phase) {
+            // Transition to ON phase
+            const uint64_t off_duration = current_tsc - tstate.phase_start_tsc;
+            tstate.avg_off_duration = (tstate.avg_off_duration * 3 + off_duration) / 4;
+            tstate.phase_start_tsc = current_tsc;
+            tstate.in_on_phase = true;
+        }
+        tstate.last_packet_tsc = current_tsc;
+        tstate.consecutive_empty = 0;
+        tstate.suggested_sleep_us = 1; // Aggressive polling during ON phases
+    } else {
+        if (tstate.in_on_phase && (time_since_last > tstate.avg_off_duration)) {
+            // Transition to OFF phase
+            const uint64_t on_duration = current_tsc - tstate.phase_start_tsc;
+            tstate.avg_on_duration = (tstate.avg_on_duration * 3 + on_duration) / 4;
+            tstate.phase_start_tsc = current_tsc;
+            tstate.in_on_phase = false;
+        }
+        
+        // Calculate adaptive sleep time
+        if (tstate.in_on_phase) {
+            tstate.suggested_sleep_us = 1;
+        } else {
+            const uint64_t avg_off_us = tstate.avg_off_duration * 1000000 / tsc_hz;
+            tstate.suggested_sleep_us = RTE_MAX(RTE_MIN(avg_off_us/2, 500), 10);
+        }
+        
+        tstate.consecutive_empty++;
+    }
+    
+    rte_spinlock_unlock(&tstate_lock);
+}
+
+
+// J : 
+static bool should_use_interrupt_mode(void) {
+    rte_spinlock_lock(&tstate_lock);
+    bool result = !tstate.in_on_phase && 
+                 (tstate.avg_on_duration > 0) && 
+                 (tstate.avg_off_duration > 0);
+    rte_spinlock_unlock(&tstate_lock);
+    return result;
+}
+
+
+
+
+// J :  jmain_intr_loop
 static int main_intr_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
@@ -1004,10 +1117,8 @@ static int main_intr_loop(__rte_unused void *dummy)
 
 	printf("--- Entered main intr loop !!! \n");
 
-	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
-				   US_PER_S * BURST_TX_DRAIN_US;
-
-	prev_tsc = 0;
+    const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
+    prev_tsc = 0;
 
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
@@ -1038,6 +1149,14 @@ static int main_intr_loop(__rte_unused void *dummy)
 	else
 		RTE_LOG(INFO, L3FWD_POWER, "RX interrupt won't enable.\n");
 
+
+	// J : Initialize traffic state
+    rte_spinlock_init(&tstate_lock);
+    memset(&tstate, 0, sizeof(tstate));
+    tstate.phase_start_tsc = rte_get_tsc_cycles();
+    tstate.last_packet_tsc = tstate.phase_start_tsc;
+
+
 	while (!is_done()) {
 		stats[lcore_id].nb_iteration_looped++;
 
@@ -1062,14 +1181,19 @@ start_rx:
 		 * Read packet from RX queues
 		 */
 		lcore_rx_idle_count = 0;
+		bool packets_received = false;
+
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			rx_queue->idle_hint = 0;
 			portid = rx_queue->port_id;
 			queueid = rx_queue->queue_id;
 
-			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,
-					MAX_PKT_BURST);
+			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
+
+			packets_received |= (nb_rx > 0);
+
+			update_traffic_state(cur_tsc, nb_rx > 0);
 
 			stats[lcore_id].nb_rx_processed += nb_rx;
 			if (unlikely(nb_rx == 0)) {
@@ -1113,54 +1237,74 @@ start_rx:
 			}
 		}
 
-		if (unlikely(lcore_rx_idle_count == qconf->n_rx_queue)) {
-			/**
-			 * All Rx queues empty in recent consecutive polls,
-			 * sleep in a conservative manner, meaning sleep as
-			 * less as possible.
-			 */
-			for (i = 1,
-			    lcore_idle_hint = qconf->rx_queue_list[0].idle_hint;
-					i < qconf->n_rx_queue; ++i) {
-				rx_queue = &(qconf->rx_queue_list[i]);
-				if (rx_queue->idle_hint < lcore_idle_hint)
-					lcore_idle_hint = rx_queue->idle_hint;
-			}
+		if (packets_received) {
+			rte_spinlock_lock(&tstate_lock);
+			tstate.consecutive_empty = 0;
+			rte_spinlock_unlock(&tstate_lock);
+		}
 
-			if (lcore_idle_hint < SUSPEND_THRESHOLD){
-				/**
-				 * execute "pause" instruction to avoid context
-				 * switch which generally take hundred of
-				 * microseconds for short sleep.
-				 */
-				//printf("DBG intrO ---> going to sleep for %d microseconds \n", lcore_idle_hint);
-				// rte_delay_us == rte_pause == _mm_pause == assembly stuff
-				rte_delay_us(lcore_idle_hint);
-			}
-			else {
-				//printf("DBG intrO --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);
-				/* suspend until rx interrupt triggers */
-				if (intr_en) {
-					turn_on_off_intr(qconf, 1);
-					// sleep_until_rx_interrupt == rte_epoll_wait == eal_epoll_wait == esce al primo evento che riceve
-					sleep_until_rx_interrupt(
-							qconf->n_rx_queue,
-							lcore_id);
-					turn_on_off_intr(qconf, 0);
-					/**
-					 * start receiving packets immediately
-					 */
-					if (likely(!is_done()))
-						goto start_rx;
+		/* Hybrid sleep decision logic */
+		if (unlikely(lcore_rx_idle_count == qconf->n_rx_queue)) {
+			bool use_interrupt = false;
+			uint64_t sleep_time_us = 1;
+
+			rte_spinlock_lock(&tstate_lock);
+			const bool force_interrupt = tstate.consecutive_empty >= MIN_CONS_EMPTY_FOR_INTR;
+
+			const uint64_t tsc_hz = rte_get_tsc_hz();
+			const bool pattern_suggests_off = !tstate.in_on_phase && 
+                                (tstate.avg_off_duration > (2000 * tsc_hz / 1000000));
+			
+			use_interrupt = force_interrupt || pattern_suggests_off;
+			sleep_time_us = tstate.suggested_sleep_us;
+			rte_spinlock_unlock(&tstate_lock);
+
+			if (use_interrupt && intr_en) {
+				/* Interrupt mode with timeout */
+				uint64_t avg_off_us = tstate.avg_off_duration * 1000000 / tsc_hz;
+				uint64_t timeout_us = RTE_MIN(MAX_INTERRUPT_TIMEOUT_US, avg_off_us);
+
+				turn_on_off_intr(qconf, 1);
+				int woke_with_packets = sleep_with_timeout(qconf->n_rx_queue, lcore_id, timeout_us);
+				turn_on_off_intr(qconf, 0);
+
+				/* Grace period polling */
+				if (woke_with_packets == 0) {
+					for (int g = 0; g < GRACE_POLL_COUNT; g++) {
+						rte_delay_us(GRACE_POLL_INTERVAL_US);
+						for (i = 0; i < qconf->n_rx_queue; ++i) {
+							rx_queue = &(qconf->rx_queue_list[i]);
+							nb_rx = rte_eth_rx_burst(rx_queue->port_id, rx_queue->queue_id,
+												pkts_burst, MAX_PKT_BURST);
+							if (nb_rx > 0) {
+								packets_received = true;
+								goto start_rx;
+							}
+						}
+					}
 				}
+				
+				if (packets_received)
+					goto start_rx;
+			} else {
+				/* Adaptive polling sleep */
+				rte_delay_us(sleep_time_us);
 			}
-			stats[lcore_id].sleep_time += lcore_idle_hint;
 		}
 	}
-
 	return 0;
 }
+
+
+
+
+
 /* >8 End of main processing loop. */
+
+// --------------------------------------------------------------------
+
+
+
 
 /* main processing loop */
 static int
