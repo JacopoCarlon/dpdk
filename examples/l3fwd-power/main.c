@@ -1251,7 +1251,8 @@ start_rx:
 			if (use_interrupt && intr_en) {
 				/* Interrupt mode with timeout */
 				uint64_t avg_off_us = tstate.avg_off_duration * 1000000 / tsc_hz;
-				uint64_t timeout_us = RTE_MIN(MAX_INTERRUPT_TIMEOUT_US, avg_off_us);
+				uint64_t timeout_us = RTE_MIN((uint64_t)MAX_INTERRUPT_TIMEOUT_US, 
+												avg_off_us);
 
 				turn_on_off_intr(qconf, 1);
 				int woke_with_packets = sleep_with_timeout(qconf->n_rx_queue, lcore_id, timeout_us);
