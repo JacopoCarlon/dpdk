@@ -1022,7 +1022,7 @@ static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
     struct rte_epoll_event events[num];
     int n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, events, num, timeout_us);
     
-    uint64_t wake_tsc = rte_get_tsc_cycles();
+    //	uint64_t wake_tsc = rte_get_tsc_cycles();
     uint16_t port_id, queue_id;
     void *data;
     
@@ -1077,25 +1077,15 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received)
         if (tstate.in_on_phase) {
             tstate.suggested_sleep_us = 1;
         } else {
-            const uint64_t avg_off_us = tstate.avg_off_duration * 1000000 / tsc_hz;
-            tstate.suggested_sleep_us = RTE_MAX(RTE_MIN(avg_off_us/2, 500), 10);
+            const uint64_t avg_off_us = (tstate.avg_off_duration * 1000000ULL) / tsc_hz;
+            const uint64_t min_val = RTE_MIN(avg_off_us/2, 500ULL);
+            tstate.suggested_sleep_us = RTE_MAX(min_val, 10ULL);
         }
         
         tstate.consecutive_empty++;
     }
     
     rte_spinlock_unlock(&tstate_lock);
-}
-
-
-// J : 
-static bool should_use_interrupt_mode(void) {
-    rte_spinlock_lock(&tstate_lock);
-    bool result = !tstate.in_on_phase && 
-                 (tstate.avg_on_duration > 0) && 
-                 (tstate.avg_off_duration > 0);
-    rte_spinlock_unlock(&tstate_lock);
-    return result;
 }
 
 
@@ -1112,7 +1102,6 @@ static int main_intr_loop(__rte_unused void *dummy)
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
 	uint32_t lcore_rx_idle_count = 0;
-	uint32_t lcore_idle_hint = 0;
 	int intr_en = 0;
 
 	printf("--- Entered main intr loop !!! \n");
