@@ -70,7 +70,7 @@ struct traffic_state {
     bool in_on_phase;
     uint32_t consecutive_empty;
     uint64_t suggested_sleep_us;
-    uint64_t last_packet_tsc;
+    uint64_t last_packet_tsc; 
 };
 static struct traffic_state tstate;
 static rte_spinlock_t tstate_lock;
