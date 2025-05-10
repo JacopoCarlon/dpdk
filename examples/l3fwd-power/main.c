@@ -72,8 +72,12 @@ struct traffic_state {
     uint64_t suggested_sleep_us;
     uint64_t last_packet_tsc; 
 };
-static struct traffic_state tstate;
-static rte_spinlock_t tstate_lock;
+//	static struct traffic_state tstate;
+//	static rte_spinlock_t tstate_lock;
+
+// Per-lcore traffic state and lock
+static RTE_DEFINE_PER_LCORE(struct traffic_state, tstate);
+static RTE_DEFINE_PER_LCORE(rte_spinlock_t, tstate_lock);
 
 
 // --------------------------------------------------------------------
@@ -1048,44 +1052,43 @@ static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
 //	(since all is discrete, we either are on or off tertium non datur)
 static void update_traffic_state(uint64_t current_tsc, bool packet_received)
 {
-    rte_spinlock_lock(&tstate_lock);
-    
+    struct traffic_state *tstate = &RTE_PER_LCORE(tstate);
+
     const uint64_t tsc_hz = rte_get_tsc_hz();
-    const uint64_t time_since_last = current_tsc - tstate.last_packet_tsc;
+    const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
     
     if (packet_received) {
-        if (!tstate.in_on_phase) {
+        if (!tstate->in_on_phase) {
             // Transition to ON phase
-            const uint64_t off_duration = current_tsc - tstate.phase_start_tsc;
-            tstate.avg_off_duration = (tstate.avg_off_duration * 3 + off_duration) / 4;
-            tstate.phase_start_tsc = current_tsc;
-            tstate.in_on_phase = true;
+            const uint64_t off_duration = current_tsc - tstate->phase_start_tsc;
+            tstate->avg_off_duration = (tstate->avg_off_duration * 3 + off_duration) >> 2;
+            tstate->phase_start_tsc = current_tsc;
+            tstate->in_on_phase = true;
         }
-        tstate.last_packet_tsc = current_tsc;
-        tstate.consecutive_empty = 0;
-        tstate.suggested_sleep_us = 1; // Aggressive polling during ON phases
+        tstate->last_packet_tsc = current_tsc;
+        tstate->consecutive_empty = 0;
+        tstate->suggested_sleep_us = 1; // Aggressive polling during ON phases
     } else {
-        if (tstate.in_on_phase && (time_since_last > tstate.avg_off_duration)) {
+        if (tstate->in_on_phase && (time_since_last > tstate->avg_off_duration)) {
             // Transition to OFF phase
-            const uint64_t on_duration = current_tsc - tstate.phase_start_tsc;
-            tstate.avg_on_duration = (tstate.avg_on_duration * 3 + on_duration) / 4;
-            tstate.phase_start_tsc = current_tsc;
-            tstate.in_on_phase = false;
+            const uint64_t on_duration = current_tsc - tstate->phase_start_tsc;
+            tstate->avg_on_duration = (tstate->avg_on_duration * 3 + on_duration) >> 2;
+            tstate->phase_start_tsc = current_tsc;
+            tstate->in_on_phase = false;
         }
         
         // Calculate adaptive sleep time
-        if (tstate.in_on_phase) {
-            tstate.suggested_sleep_us = 1;
+        if (tstate->in_on_phase) {
+            tstate->suggested_sleep_us = 1;
         } else {
-            const uint64_t avg_off_us = (tstate.avg_off_duration * 1000000ULL) / tsc_hz;
+            const uint64_t avg_off_us = (tstate->avg_off_duration * 1000000ULL) / tsc_hz;
             const uint64_t min_val = RTE_MIN(avg_off_us/2, 500ULL);
-            tstate.suggested_sleep_us = RTE_MAX(min_val, 10ULL);
+            tstate->suggested_sleep_us = RTE_MAX(min_val, 10ULL);
         }
         
-        tstate.consecutive_empty++;
+        tstate->consecutive_empty++;
     }
     
-    rte_spinlock_unlock(&tstate_lock);
 }
 
 
@@ -1140,10 +1143,16 @@ static int main_intr_loop(__rte_unused void *dummy)
 
 
 	// J : Initialize traffic state
-    rte_spinlock_init(&tstate_lock);
-    memset(&tstate, 0, sizeof(tstate));
-    tstate.phase_start_tsc = rte_get_tsc_cycles();
-    tstate.last_packet_tsc = tstate.phase_start_tsc;
+	struct traffic_state *tstate = &RTE_PER_LCORE(tstate);
+	if (tstate->phase_start_tsc == 0) {
+		memset(tstate, 0, sizeof(*tstate));
+		tstate->phase_start_tsc = rte_get_tsc_cycles();
+		tstate->last_packet_tsc = tstate->phase_start_tsc;
+		const uint64_t tsc_hz = rte_get_tsc_hz();
+		tstate->avg_on_duration = 100 * tsc_hz / 1e6;
+		tstate->avg_off_duration = 100 * tsc_hz / 1e6;
+	}
+
 
 
 	while (!is_done()) {
@@ -1227,9 +1236,7 @@ start_rx:
 		}
 
 		if (packets_received) {
-			rte_spinlock_lock(&tstate_lock);
-			tstate.consecutive_empty = 0;
-			rte_spinlock_unlock(&tstate_lock);
+			tstate->consecutive_empty = 0;
 		}
 
 		/* Hybrid sleep decision logic */
@@ -1237,20 +1244,19 @@ start_rx:
 			bool use_interrupt = false;
 			uint64_t sleep_time_us = 1;
 
-			rte_spinlock_lock(&tstate_lock);
-			const bool force_interrupt = tstate.consecutive_empty >= MIN_CONS_EMPTY_FOR_INTR;
+			const bool force_interrupt = tstate->consecutive_empty >= MIN_CONS_EMPTY_FOR_INTR;
 
 			const uint64_t tsc_hz = rte_get_tsc_hz();
-			const bool pattern_suggests_off = !tstate.in_on_phase && 
-                                (tstate.avg_off_duration > (2000 * tsc_hz / 1000000));
+			const bool pattern_suggests_off = !tstate->in_on_phase && 
+                                (tstate->avg_off_duration > (500 * tsc_hz / 1000000));
+			// off if more than 500 nanoseconds (us)
 			
 			use_interrupt = force_interrupt || pattern_suggests_off;
-			sleep_time_us = tstate.suggested_sleep_us;
-			rte_spinlock_unlock(&tstate_lock);
+			sleep_time_us = tstate->suggested_sleep_us;
 
 			if (use_interrupt && intr_en) {
 				/* Interrupt mode with timeout */
-				uint64_t avg_off_us = tstate.avg_off_duration * 1000000 / tsc_hz;
+				uint64_t avg_off_us = tstate->avg_off_duration * 1000000 / tsc_hz;
 				uint64_t timeout_us = RTE_MIN((uint64_t)MAX_INTERRUPT_TIMEOUT_US, 
 												avg_off_us);
 
