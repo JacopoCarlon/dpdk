@@ -58,10 +58,15 @@ RTE_LOG_REGISTER(l3fwd_power_logtype, l3fwd.power, INFO);
 
 // --------------------------------------------------------------------
 // J : on-off phase recognition structures
-#define MAX_INTERRUPT_TIMEOUT_US 800  	// 1ms max interrupt sleep
-#define GRACE_POLL_COUNT 10           	// Number of quick polls after wakeup
-#define GRACE_POLL_INTERVAL_US 1      	// 10μs between grace polls
-#define MIN_CONS_EMPTY_FOR_INTR 300    	// Fallback to interrupt after # empty polls
+#define MAX_INTERRUPT_TIMEOUT_US 300  	// 1ms max interrupt sleep
+#define GRACE_POLL_COUNT 100           	// Number of quick polls after wakeup
+#define GRACE_POLL_INTERVAL_US 1      	// 10us between grace polls
+#define MIN_CONS_EMPTY_FOR_INTR 100    	// Fallback to interrupt after # empty polls
+
+#define WORST_WAKE_UP_US 150ULL			// system dependent worst cpuidle delay
+#define MAX_SMALL_SLEEP_US 50ULL		// when doing small sleeps with empty queues, max lenght
+#define MIN_SMALL_SLEEP_US 10ULL		// when doing small sleeps with empty queues, min lenght
+#define NO_PKT_TS_OFF 500				// Threshold us that leads to off phase (for very long off phases)
 
 struct traffic_state {
     uint64_t avg_on_duration;
@@ -1082,8 +1087,8 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received)
             tstate->suggested_sleep_us = 1;
         } else {
             const uint64_t avg_off_us = (tstate->avg_off_duration * 1000000ULL) / tsc_hz;
-            const uint64_t min_val = RTE_MIN(avg_off_us/2, 500ULL);
-            tstate->suggested_sleep_us = RTE_MAX(min_val, 10ULL);
+            const uint64_t min_val = RTE_MIN(avg_off_us/2, MAX_SMALL_SLEEP_US);
+            tstate->suggested_sleep_us = RTE_MAX(min_val, MIN_SMALL_SLEEP_US);
         }
         
         tstate->consecutive_empty++;
@@ -1248,13 +1253,17 @@ start_rx:
 
 			const uint64_t tsc_hz = rte_get_tsc_hz();
 			const bool pattern_suggests_off = !tstate->in_on_phase && 
-                                (tstate->avg_off_duration > (500 * tsc_hz / 1000000));
+                                (tstate->avg_off_duration > (NO_PKT_TS_OFF * tsc_hz / 1000000));
 			// off if more than 500 nanoseconds (us)
+			const uint64_t current_tsc = rte_rdtsc();
+			const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
+			const uint64_t worst_wake_cycles = WORST_WAKE_UP_US * tsc_hz / 1e6;
+			const bool too_late_to_intr = time_since_last > (tstate->avg_off_duration - worst_wake_cycles);
 			
 			use_interrupt = force_interrupt || pattern_suggests_off;
 			sleep_time_us = tstate->suggested_sleep_us;
 
-			if (use_interrupt && intr_en) {
+			if (!too_late_to_intr && use_interrupt && intr_en) {
 				/* Interrupt mode with timeout */
 				uint64_t avg_off_us = tstate->avg_off_duration * 1000000 / tsc_hz;
 				uint64_t timeout_us = RTE_MIN((uint64_t)MAX_INTERRUPT_TIMEOUT_US, 
