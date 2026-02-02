@@ -2818,163 +2818,202 @@ main(int argc, char **argv)
 	uint16_t portid, nb_rx_queue, queue;
 	const char *ptr_strings[NUM_TELSTATS];
 
+	// ---------------------------------------------------------------------------
 	/* init EAL */
+	printf("main _ initializing Environment Abstraction Layer: "
+				"rte_eal_init(argc, argv);\n");
 	ret = rte_eal_init(argc, argv);
-	if (ret < 0)
-		rte_exit(EXIT_FAILURE, "Invalid EAL parameters\n");
+	if (ret < 0){
+		rte_exit(EXIT_FAILURE, "main _ Invalid EAL parameters\n");
+	}
 	argc -= ret;
 	argv += ret;
 
+	printf("main _ EAL successfully initialized\n");
 	/* catch SIGINT and restore cpufreq governor to ondemand */
 	signal(SIGINT, signal_exit_now);
 
+	// ---------------------------------------------------------------------------
 	/* init RTE timer library to be used late */
-	rte_timer_subsystem_init();
+	printf("\nmain _ initializing RealTimeEvents DataPlane subsystem: "
+				"rte_timer_subsystem_init();\n");
+	ret = rte_timer_subsystem_init();
+	if (ret<0){
+		rte_exit(EXIT_FAILURE, "main _ RTE initialization failed\n");
+	}
+	printf("main _ RTE successfully initialized\n");
 
+	// ---------------------------------------------------------------------------
 	/* if we're running pmd-mgmt mode, don't default to baseline mode */
 	baseline_enabled = false;
 
 	/* parse application arguments (after the EAL ones) */
-	printf("... ... ... -> parsing application parameters \n");
+	printf("\nmain _ parsing application parameters (after EAL ones --)\n");
 	ret = parse_args(argc, argv);
-	if (ret < 0)
-		rte_exit(EXIT_FAILURE, "Invalid L3FWD parameters\n");
+	if (ret < 0){
+		rte_exit(EXIT_FAILURE, "main _ Invalid L3FWD parameters\n");
+	}
 
-	if (app_mode == APP_MODE_DEFAULT)
+	if (app_mode == APP_MODE_DEFAULT){
 		app_mode = autodetect_mode();
+	}
 
-	printf("\n... ... ... ... Selected operation mode: %s\n\n", mode_to_str(app_mode)) ;
+	printf("\nmain _ Selected operation mode: %s\n\n", mode_to_str(app_mode)) ;
 
-	RTE_LOG(INFO, L3FWD_POWER, "Selected operation mode: %s\n",
+	RTE_LOG(INFO, L3FWD_POWER, "main _ Selected operation mode: %s\n",
 			mode_to_str(app_mode));
 
 	/* only legacy mode relies on power library */
-	if ((app_mode == APP_MODE_LEGACY) && init_power_library())
-		rte_exit(EXIT_FAILURE, "init_power_library failed\n");
+	if ((app_mode == APP_MODE_LEGACY) && init_power_library()){
+		rte_exit(EXIT_FAILURE, "main _ init_power_library failed\n");
+	}
 
-	if (update_lcore_params() < 0)
-		rte_exit(EXIT_FAILURE, "update_lcore_params failed\n");
+	if (update_lcore_params() < 0){
+		rte_exit(EXIT_FAILURE, "main _ update_lcore_params failed\n");
+	}
 
-	if (check_lcore_params() < 0)
-		rte_exit(EXIT_FAILURE, "check_lcore_params failed\n");
+	if (check_lcore_params() < 0){
+		rte_exit(EXIT_FAILURE, "main _ check_lcore_params failed\n");
+	}
 
 	ret = init_lcore_rx_queues();
-	if (ret < 0)
-		rte_exit(EXIT_FAILURE, "init_lcore_rx_queues failed\n");
+	if (ret < 0){
+		rte_exit(EXIT_FAILURE, "main _ init_lcore_rx_queues failed\n");
+	}
 
 	nb_ports = rte_eth_dev_count_avail();
 
-	if (check_port_config() < 0)
-		rte_exit(EXIT_FAILURE, "check_port_config failed\n");
+	if (check_port_config() < 0){
+		rte_exit(EXIT_FAILURE, "main _ check_port_config failed\n");
+	}
 
 	nb_lcores = rte_lcore_count();
 
 	/* initialize all ports */
+	printf("\n\nmain _ Initializing all ports!----------------------------\n");
 	RTE_ETH_FOREACH_DEV(portid) {
 		struct rte_eth_conf local_port_conf = port_conf;
 		/* not all app modes need interrupts */
-		bool need_intr = app_mode == APP_MODE_LEGACY ||
-				app_mode == APP_MODE_INTERRUPT;
+		bool need_intr = app_mode == APP_MODE_LEGACY || 
+						app_mode == APP_MODE_INTERRUPT;
 
 		/* skip ports that are not enabled */
 		if ((enabled_port_mask & (1 << portid)) == 0) {
-			printf("\nSkipping disabled port %d\n", portid);
+			printf("main _ !!!-Skipping disabled port %d\n", portid);
 			continue;
 		}
 
 		/* init port */
-		printf("Initializing port %d ... ", portid );
+		printf("main _ Initializing port %d ...\n", portid );
 		fflush(stdout);
 
 		ret = rte_eth_dev_info_get(portid, &dev_info);
-		if (ret != 0)
-			rte_exit(EXIT_FAILURE,
-				"Error during getting device (port %u) info: %s\n",
+		if (ret != 0){
+			rte_exit(EXIT_FAILURE, 
+				"main _ Error during getting device (port %u) info: %s\n",
 				portid, strerror(-ret));
+		}
 
 		dev_rxq_num = dev_info.max_rx_queues;
 		dev_txq_num = dev_info.max_tx_queues;
 
 		nb_rx_queue = get_port_n_rx_queues(portid);
-		if (nb_rx_queue > dev_rxq_num)
+		if (nb_rx_queue > dev_rxq_num){
 			rte_exit(EXIT_FAILURE,
-				"Cannot configure not existed rxq: "
-				"port=%d\n", portid);
+				"main _ Cannot configure not existed rxq: port=%d\n", 
+				portid);
+		}
 
 		n_tx_queue = nb_lcores;
-		if (n_tx_queue > dev_txq_num)
+		if (n_tx_queue > dev_txq_num){
 			n_tx_queue = dev_txq_num;
-		printf("Creating queues: nb_rxq=%d nb_txq=%u... ",
-			nb_rx_queue, (unsigned)n_tx_queue );
-		/* If number of Rx queue is 0, no need to enable Rx interrupt */
-		if (nb_rx_queue == 0)
-			need_intr = false;
+		}
 
-		if (need_intr)
+		printf("main _ Creating queues: nb_rxq=%d nb_txq=%u... ",
+				nb_rx_queue, (unsigned)n_tx_queue);
+
+		/* If number of Rx queue is 0, no need to enable Rx interrupt */
+		if (nb_rx_queue == 0){
+			need_intr = false;
+		}
+
+		if (need_intr){
 			local_port_conf.intr_conf.rxq = 1;
+		}
 
 		ret = rte_eth_dev_info_get(portid, &dev_info);
-		if (ret != 0)
+		if (ret != 0){
 			rte_exit(EXIT_FAILURE,
-				"Error during getting device (port %u) info: %s\n",
+				"main _ Error during getting device (port %u) info: %s\n",
 				portid, strerror(-ret));
+		}
 
 		ret = config_port_max_pkt_len(&local_port_conf, &dev_info);
-		if (ret != 0)
+		if (ret != 0){
 			rte_exit(EXIT_FAILURE,
-				"Invalid max packet length: %u (port %u)\n",
+				"main _ Invalid max packet length: %u (port %u)\n",
 				max_pkt_len, portid);
+		}
 
-		if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE)
+		if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE){
 			local_port_conf.txmode.offloads |=
 				RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE;
+		}
 
 		local_port_conf.rx_adv_conf.rss_conf.rss_hf &=
 			dev_info.flow_type_rss_offloads;
 		if (local_port_conf.rx_adv_conf.rss_conf.rss_hf !=
 				port_conf.rx_adv_conf.rss_conf.rss_hf) {
-			printf("Port %u modified RSS hash function based on hardware support,"
+			printf("main _ Port %u modified RSS hash function "
+				"based on hardware support, "
 				"requested:%#"PRIx64" configured:%#"PRIx64"\n",
 				portid,
 				port_conf.rx_adv_conf.rss_conf.rss_hf,
 				local_port_conf.rx_adv_conf.rss_conf.rss_hf);
 		}
 
-		if (local_port_conf.rx_adv_conf.rss_conf.rss_hf == 0)
+		if (local_port_conf.rx_adv_conf.rss_conf.rss_hf == 0){
 			local_port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
+		}
 		local_port_conf.rxmode.offloads &= dev_info.rx_offload_capa;
 		port_conf.rxmode.offloads = local_port_conf.rxmode.offloads;
 
 		ret = rte_eth_dev_configure(portid, nb_rx_queue,
 					(uint16_t)n_tx_queue, &local_port_conf);
-		if (ret < 0)
-			rte_exit(EXIT_FAILURE, "Cannot configure device: "
+		if (ret < 0){
+			rte_exit(EXIT_FAILURE, "main _ Cannot configure device: "
 					"err=%d, port=%d\n", ret, portid);
+		}
 
-		ret = rte_eth_dev_adjust_nb_rx_tx_desc(portid, &nb_rxd,
-						       &nb_txd);
-		if (ret < 0)
+		ret = rte_eth_dev_adjust_nb_rx_tx_desc(portid, &nb_rxd, &nb_txd);
+		if (ret < 0){
 			rte_exit(EXIT_FAILURE,
-				 "Cannot adjust number of descriptors: err=%d, port=%d\n",
+				 "main _ Cannot adjust number of descriptors: err=%d, port=%d\n",
 				 ret, portid);
+		}
 
 		ret = rte_eth_macaddr_get(portid, &ports_eth_addr[portid]);
-		if (ret < 0)
+		if (ret < 0){
 			rte_exit(EXIT_FAILURE,
-				 "Cannot get MAC address: err=%d, port=%d\n",
+				 "main _ Cannot get MAC address: err=%d, port=%d\n",
 				 ret, portid);
+		}
 
-		print_ethaddr(" Address:", &ports_eth_addr[portid]);
-		printf(", ");
+		print_ethaddr("main _ Address:", &ports_eth_addr[portid]);
+		printf(", ");	// todo check in original
 
 		/* init memory */
 		ret = init_mem(NB_MBUF);
-		if (ret < 0)
+		if (ret < 0){
 			rte_exit(EXIT_FAILURE, "init_mem failed\n");
+		}
 
+		/* init TX buffers */
+		printf("main _ init TX buffers\n");
 		for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
-			if (rte_lcore_is_enabled(lcore_id) == 0)
+			if (rte_lcore_is_enabled(lcore_id) == 0){
 				continue;
+			}
 
 			/* Initialize TX buffers */
 			qconf = &lcore_conf[lcore_id];
@@ -2985,35 +3024,45 @@ main(int argc, char **argv)
 				rte_exit(EXIT_FAILURE, "Can't allocate tx buffer for port %u\n",
 						 portid);
 
-			rte_eth_tx_buffer_init(qconf->tx_buffer[portid], MAX_PKT_BURST);
+			ret = rte_eth_tx_buffer_init(qconf->tx_buffer[portid], MAX_PKT_BURST);
+			if (ret < 0){
+				rte_exit(EXIT_FAILURE,
+					"main _ rte_eth_tx_buffer_init failed: err=%d, port=%d\n",
+					ret, portid);
+			}
 		}
 
 		/* init one TX queue per couple (lcore,port) */
+		printf("main _ Initializing one TX queue per couple (lcore,port)")
 		queueid = 0;
 		for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
-			if (rte_lcore_is_enabled(lcore_id) == 0)
+			if (rte_lcore_is_enabled(lcore_id) == 0){
 				continue;
+			}
 
-			if (queueid >= dev_txq_num)
+			if (queueid >= dev_txq_num){
 				continue;
+			}
 
-			if (numa_on)
-				socketid = \
-				(uint8_t)rte_lcore_to_socket_id(lcore_id);
-			else
+			if (numa_on){
+				socketid = (uint8_t)rte_lcore_to_socket_id(lcore_id);
+			} else{
 				socketid = 0;
+			}
 
-			printf("txq=%u,%d,%d ", lcore_id, queueid, socketid);
+			printf("main _ initializing : txq=%u,%d,%d ", 
+					lcore_id, queueid, socketid);
 			fflush(stdout);
 
 			txconf = &dev_info.default_txconf;
 			txconf->offloads = local_port_conf.txmode.offloads;
 			ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
-						     socketid, txconf);
-			if (ret < 0)
+							socketid, txconf);
+			if (ret < 0){
 				rte_exit(EXIT_FAILURE,
-					"rte_eth_tx_queue_setup: err=%d, "
-						"port=%d\n", ret, portid);
+					"rte_eth_tx_queue_setup: err=%d, port=%d\n", 
+					ret, portid);
+			}
 
 			qconf = &lcore_conf[lcore_id];
 			qconf->tx_queue_id[portid] = queueid;
@@ -3022,12 +3071,15 @@ main(int argc, char **argv)
 			qconf->tx_port_id[qconf->n_tx_port] = portid;
 			qconf->n_tx_port++;
 		}
-		printf("\n");
+		printf("main _ done initializing TX queue.\n");
 	}
 
+
+	printf("\n\nmain _ start iteration over lcore_id(s)!------------------\n");
 	for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
-		if (rte_lcore_is_enabled(lcore_id) == 0)
+		if (rte_lcore_is_enabled(lcore_id) == 0){
 			continue;
+		}
 
 		if (app_mode == APP_MODE_LEGACY) {
 			/* init timer structures for each enabled lcore */
@@ -3039,7 +3091,7 @@ main(int argc, char **argv)
 					power_timer_cb, NULL);
 		}
 		qconf = &lcore_conf[lcore_id];
-		printf("\nInitializing rx queues on lcore %u ... \n", lcore_id );
+		printf("main _ Initializing rx queues on lcore %u ... \n", lcore_id );
 		fflush(stdout);
 
 		/* init RX queues */
@@ -3049,45 +3101,49 @@ main(int argc, char **argv)
 			portid = qconf->rx_queue_list[queue].port_id;
 			queueid = qconf->rx_queue_list[queue].queue_id;
 
-			if (numa_on)
-				socketid = \
-				(uint8_t)rte_lcore_to_socket_id(lcore_id);
-			else
+			if (numa_on){
+				socketid = (uint8_t)rte_lcore_to_socket_id(lcore_id);
+			} else{
 				socketid = 0;
+			}
 
-			printf("rxq=%d,%d,%d ", portid, queueid, socketid);
+			printf("main _ initializing rxq=%d,%d,%d \n", 
+					portid, queueid, socketid);
 			fflush(stdout);
 
 			ret = rte_eth_dev_info_get(portid, &dev_info);
-			if (ret != 0)
+			if (ret != 0){
 				rte_exit(EXIT_FAILURE,
-					"Error during getting device (port %u) info: %s\n",
+					"main _ Error during getting device (port %u) info: %s\n",
 					portid, strerror(-ret));
+			}
 
 			rxq_conf = dev_info.default_rxconf;
 			rxq_conf.offloads = port_conf.rxmode.offloads;
 			ret = rte_eth_rx_queue_setup(portid, queueid, nb_rxd,
 				socketid, &rxq_conf,
 				pktmbuf_pool[socketid]);
-			if (ret < 0)
+			if (ret < 0){
 				rte_exit(EXIT_FAILURE,
-					"rte_eth_rx_queue_setup: err=%d, "
+					"main _ rte_eth_rx_queue_setup: err=%d, "
 						"port=%d\n", ret, portid);
+			}
 
 			if (parse_ptype) {
-				if (add_cb_parse_ptype(portid, queueid) < 0)
+				if (add_cb_parse_ptype(portid, queueid) < 0){
 					rte_exit(EXIT_FAILURE,
-						 "Fail to add ptype cb\n");
+						"main _ Fail to add ptype cb\n");
+				}
 			}
 
 			if (app_mode == APP_MODE_PMD_MGMT && !baseline_enabled) {
 				/* Set power_pmd_mgmt configs passed by user */
-				printf("working on APP_MODE_PMD_MGMT \n");
+				printf("main _ working on APP_MODE_PMD_MGMT \n");
 				rte_power_pmd_mgmt_set_emptypoll_max(max_empty_polls);
 				ret = rte_power_pmd_mgmt_set_pause_duration(pause_duration);
 				if (ret < 0){
 					rte_exit(EXIT_FAILURE,
-						"Error setting pause_duration: err=%d, lcore=%d\n",
+						"main _ Error setting pause_duration: err=%d, lcore=%d\n",
 							ret, lcore_id);
 				}
 
@@ -3095,7 +3151,7 @@ main(int argc, char **argv)
 						scale_freq_min);
 				if (ret < 0){
 					rte_exit(EXIT_FAILURE,
-						"Error setting scaling freq min: err=%d, lcore=%d\n",
+						"main _ Error setting scaling freq min: err=%d, lcore=%d\n",
 							ret, lcore_id);
 				}
 
@@ -3103,10 +3159,17 @@ main(int argc, char **argv)
 						scale_freq_max);
 				if (ret < 0){
 					rte_exit(EXIT_FAILURE,
-						"Error setting scaling freq max: err=%d, lcore %d\n",
+						"main _ Error setting scaling freq max: err=%d, lcore %d\n",
 							ret, lcore_id);
 				}
-				printf("--- finished rte_power_pmd_mgmt_set_scaling_freq_max call, with ret : %d\n", ret);
+				printf("main _ finished rte_power_pmd_mgmt_set_scaling_freq_max call, 
+						ret: %d !-------------------\n", 
+						ret);
+
+
+				printf("main _ calling rte_power_ethdev_pmgmt_queue_enable on "
+						"lcore_id %u, portid %u, queueid %u, pmgmt_type %u .\n",
+						lcore_id, portid, queueid, pmgmt_type);
 
 				ret = rte_power_ethdev_pmgmt_queue_enable(
 						lcore_id, portid, queueid,
@@ -3135,14 +3198,14 @@ main(int argc, char **argv)
 				//	 !!! -> esce al primo evento che riceve
 				
 				
-				printf("--- finished rte_power_ethdev_pmgmt_queue_enable call, with ret : %d\n", ret);
+				printf("main _ --- finished rte_power_ethdev_pmgmt_queue_enable call, with ret : %d\n", ret);
 				if (ret < 0){
 					rte_exit(EXIT_FAILURE,
-						"rte_power_ethdev_pmgmt_queue_enable: err=%d, port=%d\n",
+						"main _ rte_power_ethdev_pmgmt_queue_enable: err=%d, port=%d\n",
 							ret, portid);
 				}
 
-				printf("End of power library initialization, with ret : %d\n", ret);
+				printf("main _ End of power library initialization, with ret : %d\n", ret);
 			}
 		}
 	}
@@ -3157,39 +3220,49 @@ main(int argc, char **argv)
 		}
 		/* Start device */
 		ret = rte_eth_dev_start(portid);
-		if (ret < 0)
-			rte_exit(EXIT_FAILURE, "rte_eth_dev_start: err=%d, "
-						"port=%d\n", ret, portid);
+		if (ret < 0){
+			rte_exit(EXIT_FAILURE, "main _ rte_eth_dev_start: "
+					"err=%d, port=%d\n", 
+					ret, portid);
+		}
 		/*
 		 * If enabled, put device in promiscuous mode.
 		 * This allows IO forwarding mode to forward packets
-		 * to itself through 2 cross-connected  ports of the
+		 * to itself through 2 cross-connected ports of the
 		 * target machine.
 		 */
 		if (promiscuous_on) {
 			ret = rte_eth_promiscuous_enable(portid);
-			if (ret != 0)
+			if (ret != 0){
 				rte_exit(EXIT_FAILURE,
-					"rte_eth_promiscuous_enable: err=%s, port=%u\n",
+					"main _ rte_eth_promiscuous_enable: "
+					"err=%s, port=%u\n",
 					rte_strerror(-ret), portid);
+			}
 		}
 		/* initialize spinlock for each port */
 		rte_spinlock_init(&(locks[portid]));
 
-		if (!parse_ptype)
-			if (!check_ptype(portid))
+		if (!parse_ptype){
+			if (!check_ptype(portid)){
 				rte_exit(EXIT_FAILURE,
-					"PMD can not provide needed ptypes\n");
+					"main _ check_ptype failed on portid: %d .\n",
+					portid);
+			}
+		}
 	}
 
 	check_all_ports_link_status(enabled_port_mask);
 
-	printf("launching specific main \n");
+	printf("\n\nmain _ rte_eal_mp_remote_launch specific mainMODE \n");
 
 	/* launch per-lcore init on every lcore */
 	if (app_mode == APP_MODE_LEGACY) {
+		printf("main _ chosen mode is : APP_MODE_LEGACY\n");
 		rte_eal_mp_remote_launch(main_legacy_loop, NULL, CALL_MAIN);
-	} else if (app_mode == APP_MODE_TELEMETRY) {
+	} 
+	else if (app_mode == APP_MODE_TELEMETRY) {
+		printf("main _ chosen mode is : APP_MODE_TELEMETRY\n");
 		unsigned int i;
 
 		/* Init metrics library */
@@ -3213,19 +3286,29 @@ main(int argc, char **argv)
 				"Returns global power stats. Parameters: None");
 		rte_eal_mp_remote_launch(main_telemetry_loop, NULL,
 						SKIP_MAIN);
-	} else if (app_mode == APP_MODE_INTERRUPT) {
+	} 
+	else if (app_mode == APP_MODE_INTERRUPT) {
+		printf("main _ chosen mode is : APP_MODE_INTERRUPT\n");
 		rte_eal_mp_remote_launch(main_intr_loop, NULL, CALL_MAIN);
-	} else if (app_mode == APP_MODE_PMD_MGMT) {
+	} 
+	else if (app_mode == APP_MODE_PMD_MGMT) {
 		/* reuse telemetry loop for PMD power management mode */
+		printf("main _ chosen mode is : APP_MODE_PMD_MGMT\n");
 		rte_eal_mp_remote_launch(main_telemetry_loop, NULL, CALL_MAIN);
 	}
 
-	if (app_mode == APP_MODE_TELEMETRY)
-		launch_timer(rte_lcore_id());
+	printf("main _ done launching selected mode.\n");
 
+	if (app_mode == APP_MODE_TELEMETRY){
+		launch_timer(rte_lcore_id());
+	}
+
+	
+	printf("main _ calling rte_eal_wait_lcore\n");
 	RTE_LCORE_FOREACH_WORKER(lcore_id) {
-		if (rte_eal_wait_lcore(lcore_id) < 0)
+		if (rte_eal_wait_lcore(lcore_id) < 0){
 			return -1;
+		}
 	}
 
 	if (app_mode == APP_MODE_PMD_MGMT) {
@@ -3237,30 +3320,36 @@ main(int argc, char **argv)
 				portid = qconf->rx_queue_list[queue].port_id;
 				queueid = qconf->rx_queue_list[queue].queue_id;
 
-				rte_power_ethdev_pmgmt_queue_disable(lcore_id,
-						portid, queueid);
+				rte_power_ethdev_pmgmt_queue_disable(lcore_id, portid, queueid);
 			}
 		}
 	}
 
 	RTE_ETH_FOREACH_DEV(portid)
 	{
-		if ((enabled_port_mask & (1 << portid)) == 0)
+		if ((enabled_port_mask & (1 << portid)) == 0){
 			continue;
+		}
 
 		ret = rte_eth_dev_stop(portid);
-		if (ret != 0)
-			RTE_LOG(ERR, L3FWD_POWER, "rte_eth_dev_stop: err=%d, port=%u\n",
+		if (ret != 0){
+			RTE_LOG(ERR, L3FWD_POWER, "main _ rte_eth_dev_stop: err=%d, port=%u\n",
 				ret, portid);
+		}
 
 		rte_eth_dev_close(portid);
 	}
 
-	if ((app_mode == APP_MODE_LEGACY) && deinit_power_library())
-		rte_exit(EXIT_FAILURE, "deinit_power_library failed\n");
+	if ((app_mode == APP_MODE_LEGACY) && deinit_power_library()){
+		rte_exit(EXIT_FAILURE, "main _ deinit_power_library failed\n");
+	}
 
-	if (rte_eal_cleanup() < 0)
-		RTE_LOG(ERR, L3FWD_POWER, "EAL cleanup failed\n");
+	printf("main _ executing rte_eal_cleanup(); !!! ------");
+	if (rte_eal_cleanup() < 0){
+		RTE_LOG(ERR, L3FWD_POWER, "main _ EAL cleanup failed\n");
+	}
+
+	printf("\nmain _ main has gracefully concluded. \n");
 
 	return 0;
 }
