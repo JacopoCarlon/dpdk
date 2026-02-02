@@ -1187,6 +1187,21 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 		tstate->no_pkt_ts_off = no_pkt_ts_off;
 	}
 
+	printf("\n\n hybrid mode is starting, using parameters : \n");
+	printf("tstate->phase_start_tsc : %u\n", tstate->phase_start_tsc);
+	printf("tstate->last_packet_tsc : %u\n", tstate->last_packet_tsc);
+	printf("tstate->avg_on_duration : %u\n", tstate->avg_on_duration);
+	printf("tstate->avg_off_duration : %u\n", tstate->avg_off_duration);
+	printf("tstate->max_intr_timeout : %u\n", tstate->max_intr_timeout);
+	printf("tstate->grace_poll_count : %u\n", tstate->grace_poll_count);
+	printf("tstate->grace_poll_interval_us : %u\n", tstate->grace_poll_interval_us);
+	printf("tstate->min_cons_empty_for_intr : %u\n", tstate->min_cons_empty_for_intr);
+	printf("tstate->worst_wake_up_us : %u\n", tstate->worst_wake_up_us);
+	printf("tstate->max_small_sleep_us : %u\n", tstate->max_small_sleep_us);
+	printf("tstate->min_small_sleep_us : %u\n", tstate->min_small_sleep_us);
+	printf("tstate->no_pkt_ts_off : %u\n", tstate->no_pkt_ts_off);
+
+	printf("congratulations, let's start working !!! -----------------\n");
 
 
 	while (!is_done()) {
