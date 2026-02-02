@@ -68,6 +68,8 @@ RTE_LOG_REGISTER(l3fwd_power_logtype, l3fwd.power, INFO);
 #define MIN_SMALL_SLEEP_US 10ULL		// when doing small sleeps with empty queues, min lenght
 #define NO_PKT_TS_OFF 500				// Threshold us that leads to off phase (for very long off phases)
 
+// hybrid per-lcore traffic_state Jhybrid :
+
 struct traffic_state {
     uint64_t avg_on_duration;
     uint64_t avg_off_duration;
@@ -76,6 +78,15 @@ struct traffic_state {
     uint32_t consecutive_empty;
     uint64_t suggested_sleep_us;
     uint64_t last_packet_tsc; 
+	// Runtime copies of config for fast access
+	uint32_t max_intr_timeout;
+    uint32_t grace_poll_count;
+    uint32_t grace_poll_interval_us;
+    uint32_t min_cons_empty_for_intr;
+    uint64_t worst_wake_up_us;
+    uint32_t max_small_sleep_us;
+    uint32_t min_small_sleep_us;
+    uint32_t no_pkt_ts_off;
 };
 //	static struct traffic_state tstate;
 //	static rte_spinlock_t tstate_lock;
@@ -238,6 +249,7 @@ enum appmode {
 	APP_MODE_LEGACY,
 	APP_MODE_TELEMETRY,
 	APP_MODE_INTERRUPT,
+	APP_MODE_HYBRID,
 	APP_MODE_PMD_MGMT
 };
 
@@ -306,6 +318,16 @@ static uint32_t max_empty_polls = 512;
 static uint32_t pause_duration = 1;
 static uint32_t scale_freq_min;
 static uint32_t scale_freq_max;
+
+// hybrid global configuration variables Jhybrid : 
+static uint32_t max_interrupt_timeout_us = 300;
+static uint32_t grace_poll_count = 100;
+static uint32_t grace_poll_interval_us = 1;
+static uint32_t min_cons_empty_for_intr = 100;
+static uint64_t worst_wake_up_us = 150ULL;
+static uint32_t max_small_sleep_us = 50;
+static uint32_t min_small_sleep_us = 10;
+static uint32_t no_pkt_ts_off = 500;
 
 static int cpu_resume_latency = -1;
 static int resume_latency_bk[RTE_MAX_LCORE];
@@ -1055,10 +1077,8 @@ static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
 
 // J : function to dynamically understand if we are in a mostly on or mostly off phase 
 //	(since all is discrete, we either are on or off tertium non datur)
-static void update_traffic_state(uint64_t current_tsc, bool packet_received)
+static void update_traffic_state(uint64_t current_tsc, bool packet_received, struct traffic_state* tstate)
 {
-    struct traffic_state *tstate = &RTE_PER_LCORE(tstate);
-
     const uint64_t tsc_hz = rte_get_tsc_hz();
     const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
     
@@ -1087,8 +1107,8 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received)
             tstate->suggested_sleep_us = 1;
         } else {
             const uint64_t avg_off_us = (tstate->avg_off_duration * 1000000ULL) / tsc_hz;
-            const uint64_t min_val = RTE_MIN(avg_off_us/2, MAX_SMALL_SLEEP_US);
-            tstate->suggested_sleep_us = RTE_MAX(min_val, MIN_SMALL_SLEEP_US);
+            const uint64_t min_val = RTE_MIN(avg_off_us/2, tstate->max_small_sleep_us);
+            tstate->suggested_sleep_us = RTE_MAX(min_val, tstate->min_small_sleep_us);
         }
         
         tstate->consecutive_empty++;
@@ -1100,7 +1120,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received)
 
 
 // J :  jmain_intr_loop HYBRID jhybrid
-static int main_intr_loop(__rte_unused void *dummy)
+static int main_hybrid_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
@@ -1149,13 +1169,22 @@ static int main_intr_loop(__rte_unused void *dummy)
 
 	// J : Initialize traffic state
 	struct traffic_state *tstate = &RTE_PER_LCORE(tstate);
+	const uint64_t tsc_hz = rte_get_tsc_hz();
 	if (tstate->phase_start_tsc == 0) {
 		memset(tstate, 0, sizeof(*tstate));
 		tstate->phase_start_tsc = rte_get_tsc_cycles();
 		tstate->last_packet_tsc = tstate->phase_start_tsc;
-		const uint64_t tsc_hz = rte_get_tsc_hz();
 		tstate->avg_on_duration = 100 * tsc_hz / 1e6;
 		tstate->avg_off_duration = 100 * tsc_hz / 1e6;
+		// Copy configuration for fast access
+		tstate->max_intr_timeout = max_interrupt_timeout_us;
+		tstate->grace_poll_count = grace_poll_count;
+		tstate->grace_poll_interval_us = grace_poll_interval_us;
+		tstate->min_cons_empty_for_intr = min_cons_empty_for_intr;
+		tstate->worst_wake_up_us = worst_wake_up_us;
+		tstate->max_small_sleep_us = max_small_sleep_us;
+		tstate->min_small_sleep_us = min_small_sleep_us;
+		tstate->no_pkt_ts_off = no_pkt_ts_off;
 	}
 
 
@@ -1196,7 +1225,7 @@ start_rx:
 
 			packets_received |= (nb_rx > 0);
 
-			update_traffic_state(cur_tsc, nb_rx > 0);
+			update_traffic_state(cur_tsc, nb_rx > 0, tstate);
 
 			stats[lcore_id].nb_rx_processed += nb_rx;
 			if (unlikely(nb_rx == 0)) {
@@ -1249,15 +1278,15 @@ start_rx:
 			bool use_interrupt = false;
 			uint64_t sleep_time_us = 1;
 
-			const bool force_interrupt = tstate->consecutive_empty >= MIN_CONS_EMPTY_FOR_INTR;
+			const bool force_interrupt = tstate->consecutive_empty >= tstate->min_cons_empty_for_intr;
 
 			const uint64_t tsc_hz = rte_get_tsc_hz();
 			const bool pattern_suggests_off = !tstate->in_on_phase && 
-                                (tstate->avg_off_duration > (NO_PKT_TS_OFF * tsc_hz / 1000000));
+                                (tstate->avg_off_duration > (tstate->no_pkt_ts_off * tsc_hz / 1000000));
 			// off if more than 500 nanoseconds (us)
 			const uint64_t current_tsc = rte_rdtsc();
 			const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
-			const uint64_t worst_wake_cycles = WORST_WAKE_UP_US * tsc_hz / 1e6;
+			const uint64_t worst_wake_cycles = tstate->worst_wake_up_us * tsc_hz / 1e6;
 			const bool too_late_to_intr = time_since_last > (tstate->avg_off_duration - worst_wake_cycles);
 			
 			use_interrupt = force_interrupt || pattern_suggests_off;
@@ -1266,8 +1295,7 @@ start_rx:
 			if (!too_late_to_intr && use_interrupt && intr_en) {
 				/* Interrupt mode with timeout */
 				uint64_t avg_off_us = tstate->avg_off_duration * 1000000 / tsc_hz;
-				uint64_t timeout_us = RTE_MIN((uint64_t)MAX_INTERRUPT_TIMEOUT_US, 
-												avg_off_us);
+				uint64_t timeout_us = RTE_MIN((uint64_t)tstate->max_intr_timeout, avg_off_us);
 
 				turn_on_off_intr(qconf, 1);
 				int woke_with_packets = sleep_with_timeout(qconf->n_rx_queue, lcore_id, timeout_us);
@@ -1275,8 +1303,8 @@ start_rx:
 
 				/* Grace period polling */
 				if (woke_with_packets == 0) {
-					for (int g = 0; g < GRACE_POLL_COUNT; g++) {
-						rte_delay_us(GRACE_POLL_INTERVAL_US);
+					for (int g = 0; g < tstate->grace_poll_count; g++) {
+						rte_delay_us(tstate->grace_poll_interval_us);
 						for (i = 0; i < qconf->n_rx_queue; ++i) {
 							rx_queue = &(qconf->rx_queue_list[i]);
 							nb_rx = rte_eth_rx_burst(rx_queue->port_id, rx_queue->queue_id,
@@ -1312,7 +1340,7 @@ start_rx:
 
 // this is the original main_intr_loop !!!!
 /* Main processing loop. 8< */
-static int old_main_intr_loop_old(__rte_unused void *dummy)
+static int main_intr_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
@@ -1948,6 +1976,15 @@ print_usage(const char *prgname)
 		" --telemetry: enable telemetry mode, to update"
 		" empty polls, full polls, and core busyness to telemetry\n"
 		" --interrupt-only: enable interrupt-only mode\n"
+		"  --hybrid: enable hybrid polling/interrupt mode\n"
+        "  --max-interrupt-timeout TIMEOUT_US: max interrupt sleep time in us (default: 300)\n"
+        "  --grace-poll-count COUNT: quick polls after wakeup (default: 100)\n"
+        "  --grace-poll-interval INTERVAL_US: interval between grace polls in us (default: 1)\n"
+        "  --min-cons-empty COUNT: empty polls before interrupt fallback (default: 100)\n"
+        "  --worst-wake-up US: worst case wake up delay in us (default: 150)\n"
+        "  --max-small-sleep US: max small sleep duration in us (default: 50)\n"
+        "  --min-small-sleep US: min small sleep duration in us (default: 10)\n"
+        "  --no-pkt-ts-off US: threshold for off phase detection in us (default: 500)\n",
 		" --pmd-mgmt MODE: enable PMD power management mode. "
 		"Currently supported modes: baseline, monitor, pause, scale\n"
 		"  --max-empty-polls MAX_EMPTY_POLLS: number of empty polls to"
@@ -2178,6 +2215,18 @@ parse_pmd_mgmt_config(const char *name)
 #define CMD_LINE_OPT_SCALE_FREQ_MAX "scale-freq-max"
 #define CMD_LINE_OPT_CPU_RESUME_LATENCY "cpu-resume-latency"
 
+// hybrid command-line macros for configuration variables Jhybrid : 
+#define CMD_LINE_OPT_HYBRID "hybrid"
+#define CMD_LINE_OPT_MAX_INTERRUPT_TIMEOUT "max-interrupt-timeout"
+#define CMD_LINE_OPT_GRACE_POLL_COUNT "grace-poll-count"
+#define CMD_LINE_OPT_GRACE_POLL_INTERVAL "grace-poll-interval"
+#define CMD_LINE_OPT_MIN_CONS_EMPTY "min-cons-empty"
+#define CMD_LINE_OPT_WORST_WAKE_UP "worst-wake-up"
+#define CMD_LINE_OPT_MAX_SMALL_SLEEP "max-small-sleep"
+#define CMD_LINE_OPT_MIN_SMALL_SLEEP "min-small-sleep"
+#define CMD_LINE_OPT_NO_PKT_TS_OFF "no-pkt-ts-off"
+
+
 /* Parse the argument given in the command line of the application */
 static int
 parse_args(int argc, char **argv)
@@ -2197,6 +2246,16 @@ parse_args(int argc, char **argv)
 		{CMD_LINE_OPT_LEGACY, 0, 0, 0},
 		{CMD_LINE_OPT_TELEMETRY, 0, 0, 0},
 		{CMD_LINE_OPT_INTERRUPT_ONLY, 0, 0, 0},
+		// jhybrid logopts :
+		{CMD_LINE_OPT_HYBRID, 0, 0, 0},  				// jhybrid mode
+		{CMD_LINE_OPT_MAX_INTERRUPT_TIMEOUT, 1, 0, 0},
+		{CMD_LINE_OPT_GRACE_POLL_COUNT, 1, 0, 0},
+		{CMD_LINE_OPT_GRACE_POLL_INTERVAL, 1, 0, 0},
+		{CMD_LINE_OPT_MIN_CONS_EMPTY, 1, 0, 0},
+		{CMD_LINE_OPT_WORST_WAKE_UP, 1, 0, 0},
+		{CMD_LINE_OPT_MAX_SMALL_SLEEP, 1, 0, 0},
+		{CMD_LINE_OPT_MIN_SMALL_SLEEP, 1, 0, 0},
+		{CMD_LINE_OPT_NO_PKT_TS_OFF, 1, 0, 0},
 		{CMD_LINE_OPT_PMD_MGMT, 1, 0, 0},
 		{CMD_LINE_OPT_MAX_EMPTY_POLLS, 1, 0, 0},
 		{CMD_LINE_OPT_PAUSE_DURATION, 1, 0, 0},
@@ -2319,6 +2378,7 @@ parse_args(int argc, char **argv)
 				app_mode = APP_MODE_PMD_MGMT;
 				printf("PMD power mgmt mode is enabled\n");
 			}
+
 			if (!strncmp(lgopts[option_index].name,
 					CMD_LINE_OPT_INTERRUPT_ONLY,
 					sizeof(CMD_LINE_OPT_INTERRUPT_ONLY))) {
@@ -2328,6 +2388,91 @@ parse_args(int argc, char **argv)
 				}
 				app_mode = APP_MODE_INTERRUPT;
 				printf("interrupt-only mode is enabled\n");
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_HYBRID,
+						sizeof(CMD_LINE_OPT_HYBRID))) {
+				if (app_mode != APP_MODE_DEFAULT) {
+					printf(" hybrid mode is mutually exclusive with other modes\n");
+					return -1;
+				}
+				app_mode = APP_MODE_HYBRID;
+				printf("hybrid mode is enabled\n");
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_MAX_INTERRUPT_TIMEOUT,
+						sizeof(CMD_LINE_OPT_MAX_INTERRUPT_TIMEOUT))) {
+				if (parse_uint(optarg, UINT32_MAX, &max_interrupt_timeout_us) != 0)
+					return -1;
+				printf("Max interrupt timeout configured to %u us\n", max_interrupt_timeout_us);
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_GRACE_POLL_COUNT,
+						sizeof(CMD_LINE_OPT_GRACE_POLL_COUNT))) {
+				if (parse_uint(optarg, UINT32_MAX, &grace_poll_count) != 0)
+					return -1;
+				printf("Grace poll count configured to %u\n", grace_poll_count);
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_GRACE_POLL_INTERVAL,
+						sizeof(CMD_LINE_OPT_GRACE_POLL_INTERVAL))) {
+				if (parse_uint(optarg, UINT32_MAX, &grace_poll_interval_us) != 0)
+					return -1;
+				printf("Grace poll interval configured to %u us\n", grace_poll_interval_us);
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_MIN_CONS_EMPTY,
+						sizeof(CMD_LINE_OPT_MIN_CONS_EMPTY))) {
+				if (parse_uint(optarg, UINT32_MAX, &min_cons_empty_for_intr) != 0)
+					return -1;
+				printf("Min consecutive empty configured to %u\n", min_cons_empty_for_intr);
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_WORST_WAKE_UP,
+						sizeof(CMD_LINE_OPT_WORST_WAKE_UP))) {
+				// Special parsing for uint64_t
+				char *end = NULL;
+				unsigned long long val = strtoull(optarg, &end, 10);
+				if (end == optarg || *end != '\0' || val > UINT64_MAX) {
+					printf("Invalid value for worst-wake-up\n");
+					return -1;
+				}
+				worst_wake_up_us = (uint64_t)val;
+				printf("Worst wake up configured to %"PRIu64" us\n", worst_wake_up_us);
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_MAX_SMALL_SLEEP,
+						sizeof(CMD_LINE_OPT_MAX_SMALL_SLEEP))) {
+				if (parse_uint(optarg, UINT32_MAX, &max_small_sleep_us) != 0)
+					return -1;
+				printf("Max small sleep configured to %u us\n", max_small_sleep_us);
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_MIN_SMALL_SLEEP,
+						sizeof(CMD_LINE_OPT_MIN_SMALL_SLEEP))) {
+				if (parse_uint(optarg, UINT32_MAX, &min_small_sleep_us) != 0)
+					return -1;
+				if (min_small_sleep_us >= max_small_sleep_us) {
+					printf("min-small-sleep must be less than max-small-sleep\n");
+					return -1;
+				}
+				printf("Min small sleep configured to %u us\n", min_small_sleep_us);
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_NO_PKT_TS_OFF,
+						sizeof(CMD_LINE_OPT_NO_PKT_TS_OFF))) {
+				if (parse_uint(optarg, UINT32_MAX, &no_pkt_ts_off) != 0)
+					return -1;
+				printf("No packet timestamp offset configured to %u us\n", no_pkt_ts_off);
 			}
 
 			if (!strncmp(lgopts[option_index].name,
@@ -3089,6 +3234,7 @@ main(int argc, char **argv)
 		struct rte_eth_conf local_port_conf = port_conf;
 		/* not all app modes need interrupts */
 		bool need_intr = app_mode == APP_MODE_LEGACY || 
+						app_mode == APP_MODE_HYBRID || 
 						app_mode == APP_MODE_INTERRUPT;
 
 		/* skip ports that are not enabled */
@@ -3449,6 +3595,8 @@ main(int argc, char **argv)
 
 	printf("\n\nmain _ rte_eal_mp_remote_launch specific mainMODE \n");
 
+	// this is where the main actually launches the different modes !!!
+
 	/* launch per-lcore init on every lcore */
 	if (app_mode == APP_MODE_LEGACY) {
 		printf("main _ chosen mode is : APP_MODE_LEGACY\n");
@@ -3483,6 +3631,10 @@ main(int argc, char **argv)
 	else if (app_mode == APP_MODE_INTERRUPT) {
 		printf("main _ chosen mode is : APP_MODE_INTERRUPT\n");
 		rte_eal_mp_remote_launch(main_intr_loop, NULL, CALL_MAIN);
+	} 
+	else if (app_mode == APP_MODE_HYBRID){
+		printf("main _ chosen mode is : APP_MODE_HYBRID\n");
+		rte_eal_mp_remote_launch(main_hybrid_loop, NULL, CALL_MAIN);
 	} 
 	else if (app_mode == APP_MODE_PMD_MGMT) {
 		/* reuse telemetry loop for PMD power management mode */
