@@ -1098,7 +1098,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received)
 
 
 
-// J :  jmain_intr_loop
+// J :  jmain_intr_loop HYBRID jhybrid
 static int main_intr_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
@@ -2909,6 +2909,12 @@ main(int argc, char **argv)
 	/* initialize all ports */
 	printf("\n\nmain _ Initializing all ports!----------------------------\n");
 	RTE_ETH_FOREACH_DEV(portid) {
+		
+		/* init port */
+		printf("\nmain _ Initializing portid: %d -----------------------------------------------------\n", 
+				portid );
+		fflush(stdout);
+
 		struct rte_eth_conf local_port_conf = port_conf;
 		/* not all app modes need interrupts */
 		bool need_intr = app_mode == APP_MODE_LEGACY || 
@@ -2920,9 +2926,6 @@ main(int argc, char **argv)
 			continue;
 		}
 
-		/* init port */
-		printf("main _ Initializing port %d ...\n", portid );
-		fflush(stdout);
 
 		ret = rte_eth_dev_info_get(portid, &dev_info);
 		if (ret != 0){
@@ -3017,12 +3020,14 @@ main(int argc, char **argv)
 		}
 
 		print_ethaddr("main _ Address:", &ports_eth_addr[portid]);
-		printf(", ");	// todo check in original
+		printf(", ");	// it's like this also in original, for some reason..
+		printf("\n");
 
 		/* init memory */
+		printf("main _ calling init_mem\n");
 		ret = init_mem(NB_MBUF);
 		if (ret < 0){
-			rte_exit(EXIT_FAILURE, "init_mem failed\n");
+			rte_exit(EXIT_FAILURE, "main _ init_mem failed\n");
 		}
 
 		/* init TX buffers */
