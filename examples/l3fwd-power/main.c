@@ -1050,7 +1050,8 @@ static int event_register(struct lcore_conf *qconf)
 static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
 {
     struct rte_epoll_event events[num];
-    int n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, events, num, timeout_us);
+	int n = 0;
+    n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, events, num, timeout_us);
     
     //	uint64_t wake_tsc = rte_get_tsc_cycles();
     uint16_t port_id, queue_id;
@@ -1222,7 +1223,6 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 			prev_tsc = cur_tsc;
 		}
 
-start_rx:
 		/*
 		 * Read packet from RX queues
 		 */
@@ -1284,6 +1284,7 @@ start_rx:
 		}
 
 		if (packets_received) {
+			// we have received packets, therefore consecutive_empty shall be reset to now.
 			tstate->consecutive_empty = 0;
 		}
 
@@ -1313,10 +1314,13 @@ start_rx:
 
 				turn_on_off_intr(qconf, 1);
 				int woke_with_packets = sleep_with_timeout(qconf->n_rx_queue, lcore_id, timeout_us);
+				// sleep_with_timeout returns 0 if woke with timeout, 
+				// otherwise returns the number of events that woke it up
 				turn_on_off_intr(qconf, 0);
 
 				/* Grace period polling */
 				if (woke_with_packets == 0) {
+					// awoken with timeout, execute grace polling
 					for (uint32_t g = 0; g < tstate->grace_poll_count; g++) {
 						rte_delay_us(tstate->grace_poll_interval_us);
 						for (i = 0; i < qconf->n_rx_queue; ++i) {
@@ -1325,13 +1329,17 @@ start_rx:
 												pkts_burst, MAX_PKT_BURST);
 							if (nb_rx > 0) {
 								packets_received = true;
-								goto start_rx;
+								if (likely(!is_done())){
+									goto start_rx;
+								}
 							}
 						}
 					}
+					// after grace-polling, if still no packets, 
+					// simply continue the while(!is_done() as usual, waiting for packets)
+					// this will fallthrough (packets_received is still false)
 				}
-				// todo : check this logic of if/else
-				if (packets_received){
+				if (packets_received && likely(!is_done())){
 					goto start_rx;
 				}
 			} else {
