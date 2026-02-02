@@ -71,22 +71,22 @@ RTE_LOG_REGISTER(l3fwd_power_logtype, l3fwd.power, INFO);
 // hybrid per-lcore traffic_state Jhybrid :
 
 struct traffic_state {
-    uint64_t avg_on_duration;
-    uint64_t avg_off_duration;
-    uint64_t phase_start_tsc;
-    bool in_on_phase;
-    uint32_t consecutive_empty;
-    uint64_t suggested_sleep_us;
-    uint64_t last_packet_tsc; 
+	uint64_t avg_on_duration;
+	uint64_t avg_off_duration;
+	uint64_t phase_start_tsc;
+	bool in_on_phase;
+	uint32_t consecutive_empty;
+	uint64_t suggested_sleep_us;
+	uint64_t last_packet_tsc; 
 	// Runtime copies of config for fast access
 	uint32_t max_intr_timeout;
-    uint32_t grace_poll_count;
-    uint32_t grace_poll_interval_us;
-    uint32_t min_cons_empty_for_intr;
-    uint64_t worst_wake_up_us;
-    uint32_t max_small_sleep_us;
-    uint32_t min_small_sleep_us;
-    uint32_t no_pkt_ts_off;
+	uint32_t grace_poll_count;
+	uint32_t grace_poll_interval_us;
+	uint32_t min_cons_empty_for_intr;
+	uint64_t worst_wake_up_us;
+	uint32_t max_small_sleep_us;
+	uint32_t min_small_sleep_us;
+	uint32_t no_pkt_ts_off;
 };
 //	static struct traffic_state tstate;
 //	static rte_spinlock_t tstate_lock;
@@ -1188,18 +1188,18 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	}
 
 	printf("\n\n hybrid mode is starting, using parameters : \n");
-	printf("tstate->phase_start_tsc : %u\n", tstate->phase_start_tsc);
-	printf("tstate->last_packet_tsc : %u\n", tstate->last_packet_tsc);
-	printf("tstate->avg_on_duration : %u\n", tstate->avg_on_duration);
-	printf("tstate->avg_off_duration : %u\n", tstate->avg_off_duration);
-	printf("tstate->max_intr_timeout : %u\n", tstate->max_intr_timeout);
-	printf("tstate->grace_poll_count : %u\n", tstate->grace_poll_count);
-	printf("tstate->grace_poll_interval_us : %u\n", tstate->grace_poll_interval_us);
-	printf("tstate->min_cons_empty_for_intr : %u\n", tstate->min_cons_empty_for_intr);
-	printf("tstate->worst_wake_up_us : %u\n", tstate->worst_wake_up_us);
-	printf("tstate->max_small_sleep_us : %u\n", tstate->max_small_sleep_us);
-	printf("tstate->min_small_sleep_us : %u\n", tstate->min_small_sleep_us);
-	printf("tstate->no_pkt_ts_off : %u\n", tstate->no_pkt_ts_off);
+	printf("tstate->phase_start_tsc : %lu\n", 			tstate->phase_start_tsc);
+	printf("tstate->last_packet_tsc : %lu\n", 			tstate->last_packet_tsc);
+	printf("tstate->avg_on_duration : %lu\n", 			tstate->avg_on_duration);
+	printf("tstate->avg_off_duration : %lu\n", 			tstate->avg_off_duration);
+	printf("tstate->max_intr_timeout : %u\n", 			tstate->max_intr_timeout);
+	printf("tstate->grace_poll_count : %u\n", 			tstate->grace_poll_count);
+	printf("tstate->grace_poll_interval_us : %u\n", 	tstate->grace_poll_interval_us);
+	printf("tstate->min_cons_empty_for_intr : %u\n", 	tstate->min_cons_empty_for_intr);
+	printf("tstate->worst_wake_up_us : %lu\n", 			tstate->worst_wake_up_us);
+	printf("tstate->max_small_sleep_us : %u\n", 		tstate->max_small_sleep_us);
+	printf("tstate->min_small_sleep_us : %u\n", 		tstate->min_small_sleep_us);
+	printf("tstate->no_pkt_ts_off : %u\n", 				tstate->no_pkt_ts_off);
 
 	printf("congratulations, let's start working !!! -----------------\n");
 
@@ -1318,7 +1318,7 @@ start_rx:
 
 				/* Grace period polling */
 				if (woke_with_packets == 0) {
-					for (int g = 0; g < tstate->grace_poll_count; g++) {
+					for (uint32_t g = 0; g < tstate->grace_poll_count; g++) {
 						rte_delay_us(tstate->grace_poll_interval_us);
 						for (i = 0; i < qconf->n_rx_queue; ++i) {
 							rx_queue = &(qconf->rx_queue_list[i]);
@@ -1331,9 +1331,10 @@ start_rx:
 						}
 					}
 				}
-				
-				if (packets_received)
+				// todo : check this logic of if/else
+				if (packets_received){
 					goto start_rx;
+				}
 			} else {
 				/* Adaptive polling sleep */
 				rte_delay_us(sleep_time_us);
@@ -3387,7 +3388,7 @@ main(int argc, char **argv)
 		}
 
 		/* init one TX queue per couple (lcore,port) */
-		printf("main _ Initializing one TX queue per couple (lcore,port)")
+		printf("main _ Initializing one TX queue per couple (lcore,port)");
 		queueid = 0;
 		for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
 			if (rte_lcore_is_enabled(lcore_id) == 0){
@@ -3516,8 +3517,8 @@ main(int argc, char **argv)
 						"main _ Error setting scaling freq max: err=%d, lcore %d\n",
 							ret, lcore_id);
 				}
-				printf("main _ finished rte_power_pmd_mgmt_set_scaling_freq_max call, 
-						ret: %d !-------------------\n", 
+				printf("main _ finished rte_power_pmd_mgmt_set_scaling_freq_max call, "
+						"ret: %d !-------------------\n", 
 						ret);
 
 
