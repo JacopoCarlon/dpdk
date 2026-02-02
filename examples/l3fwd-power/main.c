@@ -1224,6 +1224,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 			prev_tsc = cur_tsc;
 		}
 
+start_rx: 
 		/*
 		 * Read packet from RX queues
 		 */
