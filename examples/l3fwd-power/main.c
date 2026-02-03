@@ -2001,7 +2001,7 @@ print_usage(const char *prgname)
 		" --telemetry: enable telemetry mode, to update"
 		" empty polls, full polls, and core busyness to telemetry\n"
 		" --interrupt-only: enable interrupt-only mode\n"
-		"  --hybrid: enable hybrid polling/interrupt mode\n"
+		" --hybrid: enable hybrid polling/interrupt mode\n"
         "  --max-interrupt-timeout TIMEOUT_US: max interrupt sleep time in us (default: 300)\n"
         "  --grace-poll-count COUNT: quick polls after wakeup (default: 100)\n"
         "  --grace-poll-interval INTERVAL_US: interval between grace polls in us (default: 1)\n"
