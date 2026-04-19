@@ -1547,6 +1547,25 @@ start_rx:
 
 
 
+/*
+remember !!! 
+	from : rte_power_pmd_mgmt.h 
+		
+	// 
+	// PMD Power Management Type
+	// 
+	enum rte_power_pmd_mgmt_type {
+		//  Use power-optimized monitoring to wait for incoming traffic 
+		RTE_POWER_MGMT_TYPE_MONITOR = 1,
+		//  Use power-optimized sleep to avoid busy polling 
+		RTE_POWER_MGMT_TYPE_PAUSE,
+		//  Use frequency scaling when traffic is low 
+		RTE_POWER_MGMT_TYPE_SCALE,
+	};
+*/
+
+
+
 
 /* main processing loop */
 static int
@@ -1573,10 +1592,18 @@ main_telemetry_loop(__rte_unused void *dummy)
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
 
+	printf("_main_telemetry_loop: entered\n");
+
+	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n", pmgmt_type);
+	if (baseline_enabled){
+		printf("_main_telemetry_loop running baseline\n");
+	}
+
+	
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, L3FWD_POWER, "lcore %u has nothing to do\n",
 			lcore_id);
-		printf("returning 0 from main_telemetry_loop\n");
+		printf("returning 0 from main_telemetry_loop, since the number of receiver queues selected was 0.\n");
 		return 0;
 	}
 
@@ -1590,10 +1617,11 @@ main_telemetry_loop(__rte_unused void *dummy)
 			"rxqueueid=%" PRIu16 "\n", lcore_id, portid, queueid);
 	}
 
-	printf("_done for, entering while \n");
+	printf("_main_telemetry_loop: _done for, entering while \n");
 	
-	while (!is_done()) {
 
+	while (!is_done()) {
+		
 		// printf("___ drain tx queue\n"); // this happens !
 		cur_tsc = rte_rdtsc();
 		/*
