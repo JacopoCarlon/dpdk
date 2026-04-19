@@ -895,6 +895,11 @@ l3fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 
 }
 
+
+
+// --------------------------------------------------------------------
+
+
 #define MINIMUM_SLEEP_TIME         1
 #define SUSPEND_THRESHOLD          300
 
@@ -944,15 +949,21 @@ power_freq_scaleup_heuristic(unsigned lcore_id,
 	return FREQ_CURRENT;
 }
 
+
+
+// --------------------------------------------------------------------
+
+
+
 /**
  * force polling thread sleep until one-shot rx interrupt triggers
- * @param port_id
+ * param port_id
  *  Port id.
- * @param queue_id
+ * param queue_id
  *  Rx queue id.
- * @return
+ * return
  *  0 on success
- */
+*/
 static int
 sleep_until_rx_interrupt(int num, int lcore)
 {
@@ -978,7 +989,7 @@ sleep_until_rx_interrupt(int num, int lcore)
 	// the <rte_epoll_wait> is the sleep part !
 	n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, event, num, 10);
 
-	// now this is wake-up ! 
+	// now this is wake-up !
 	for (i = 0; i < n; i++) {
 		data = event[i].epdata.data;
 		port_id = ((uintptr_t)data) >> (sizeof(uint16_t) * CHAR_BIT);
@@ -994,6 +1005,7 @@ sleep_until_rx_interrupt(int num, int lcore)
 
 	return 0;
 }
+
 
 static void turn_on_off_intr(struct lcore_conf *qconf, bool on)
 {
@@ -1015,6 +1027,7 @@ static void turn_on_off_intr(struct lcore_conf *qconf, bool on)
 		rte_spinlock_unlock(&(locks[port_id]));
 	}
 }
+
 
 static int event_register(struct lcore_conf *qconf)
 {
@@ -1052,21 +1065,21 @@ static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
     struct rte_epoll_event events[num];
 	int n = 0;
     n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, events, num, timeout_us);
-    
+
     //	uint64_t wake_tsc = rte_get_tsc_cycles();
     uint16_t port_id, queue_id;
     void *data;
-    
+
     for (int i = 0; i < n; i++) {
         data = events[i].epdata.data;
         port_id = ((uintptr_t)data) >> (sizeof(uint16_t) * CHAR_BIT);
-        queue_id = ((uintptr_t)data) & 
+        queue_id = ((uintptr_t)data) &
                   RTE_LEN2MASK((sizeof(uint16_t) * CHAR_BIT), uint16_t);
         
         RTE_LOG(INFO, L3FWD_POWER, "Woke up from interrupt on port %d queue %d\n",
                 port_id, queue_id);
     }
-    
+
     return n;
 }
 
@@ -1075,13 +1088,13 @@ static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
 
 
 
-// J : function to dynamically understand if we are in a mostly on or mostly off phase 
+// J : function to dynamically understand if we are in a mostly on or mostly off phase
 //	(since all is discrete, we either are on or off tertium non datur)
 static void update_traffic_state(uint64_t current_tsc, bool packet_received, struct traffic_state* tstate)
 {
     const uint64_t tsc_hz = rte_get_tsc_hz();
     const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
-    
+
     if (packet_received) {
         if (!tstate->in_on_phase) {
             // Transition to ON phase
@@ -1101,7 +1114,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
             tstate->phase_start_tsc = current_tsc;
             tstate->in_on_phase = false;
         }
-        
+
         // Calculate adaptive sleep time
         if (tstate->in_on_phase) {
             tstate->suggested_sleep_us = 1;
@@ -1110,10 +1123,10 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
             const uint64_t min_val = RTE_MIN(avg_off_us/2, tstate->max_small_sleep_us);
             tstate->suggested_sleep_us = RTE_MAX(min_val, tstate->min_small_sleep_us);
         }
-        
+
         tstate->consecutive_empty++;
     }
-    
+
 }
 
 
@@ -1123,12 +1136,12 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
 
 /*
 Few important notes!
-the two vital pieces of code (clb_umwait and clb_pause) are in lib/power/rte_power_pmd_mgmt.c 
+the two vital pieces of code (clb_umwait and clb_pause) are in lib/power/rte_power_pmd_mgmt.c
 
 
-- pmd-mgmt=monitor 
-		-> selects the RTE_POWER_MGMT_TYPE_MONITOR						
-		-> in main, it does rte_power_ethdev_pmgmt_queue_enable(...) 	
+- pmd-mgmt=monitor
+		-> selects the RTE_POWER_MGMT_TYPE_MONITOR
+		-> in main, it does rte_power_ethdev_pmgmt_queue_enable(...)
 			-> which assigns assigns clb=get_monitor_callback			in lib/power/rte_power_pmd_mgmt.c
 		-> get_monitor_callback 										in lib/power/rte_power_pmd_mgmt.c
 		-> does clb_umwait() 											in lib/power/rte_power_pmd_mgmt.c
@@ -1137,14 +1150,14 @@ the two vital pieces of code (clb_umwait and clb_pause) are in lib/power/rte_pow
 		-> which actually executes intel_umwait.
 
 		as was setup by RTE_INIT(rte_power_intrinsics_init), 
-			which is always run before main . 
+			which is always run before main.
 		-> setups intel_umonitor() 										in lib/eal&x86/rte_power_intrinsics.c
 		-> setups intel_umwait() 										in lib/eal&x86/rte_power_intrinsics.c
 
 
 - pmd-mgmt=pause
-		-> selects the RTE_POWER_MGMT_TYPE_PAUSE	
-		-> in main, it does rte_power_ethdev_pmgmt_queue_enable(...)	
+		-> selects the RTE_POWER_MGMT_TYPE_PAUSE
+		-> in main, it does rte_power_ethdev_pmgmt_queue_enable(...)
 			-> which assigns clb=clb_pause								in lib/power/rte_power_pmd_mgmt.c
 		-> clb_pause													in lib/power/rte_power_pmd_mgmt.c
 		-> which calls either rte_power_pause() or rte_pause()			in lib/power/rte_power_pmd_mgmt.c
@@ -1154,14 +1167,14 @@ the two vital pieces of code (clb_umwait and clb_pause) are in lib/power/rte_pow
 		rte_pause() 		is _mm_pause()								in lib/eal/x86/include/rte_pause.h
 			_mm_pause uses #include <emmintrin.h>
 
-	-> in our tests (see clb_pause printf in branching option), 
-			we were ALWAYS running rte_pause, 
-			meaning that treebeard, cplex3, whiskey and lace do not activate the 
+	-> in our tests (see clb_pause printf in branching option),
+			we were ALWAYS running rte_pause,
+			meaning that treebeard, cplex3, whiskey and lace do not activate the
 			global_data.intrinsics_support.power_pause, and thus don't support rte_power_pause()
 			.
 
 
-- rte_delay_us(int)								
+- rte_delay_us(int)
 		-> is actually void (*rte_delay_us)(unsigned int) = NULL;		in lib/eal/common/eal_common_timer.c
 		-> is rte_delay_us_block(unsigned int us)						in lib/eal/common/eal_common_timer.c
 		-> it always calls rte_pause()									in lib/eal/x86/include/rte_pause.h
@@ -1651,7 +1664,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 		printf("_main_telemetry_loop running baseline\n");
 	}
 
-	
+
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, L3FWD_POWER, "lcore %u has nothing to do\n",
 			lcore_id);
@@ -1755,6 +1768,15 @@ main_telemetry_loop(__rte_unused void *dummy)
 
 	return 0;
 }
+
+
+
+
+
+// --------------------------------------------------------------------
+
+
+
 
 /* main processing loop */
 static int
@@ -1956,6 +1978,13 @@ start_rx:
 
 	return 0;
 }
+
+
+
+
+
+
+// --------------------------------------------------------------------
 
 
 
