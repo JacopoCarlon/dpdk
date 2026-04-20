@@ -955,6 +955,24 @@ power_freq_scaleup_heuristic(unsigned lcore_id,
 
 
 
+
+
+
+void
+rte_delay_ns_block(unsigned int ns)
+{
+    const uint64_t start = rte_get_timer_cycles();
+    const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
+    while ((rte_get_timer_cycles() - start) < ticks)
+        rte_pause();
+}
+
+
+
+
+
+
+
 /**
  * force polling thread sleep until one-shot rx interrupt triggers
  * param port_id
@@ -1763,9 +1781,12 @@ main_telemetry_loop(__rte_unused void *dummy)
 			rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
 		}
 
-		// test relaxing busypolling 
-		// rte_pause();
+
+		// --- --- test relaxing busypolling --- --- 
+		// rte_pause();		
 		// rte_delay_us(1);
+		// rte_delay_ns_block(30);
+
 
 		// printf("___ cycling in while!\n"); // this happens ! 
 	}
