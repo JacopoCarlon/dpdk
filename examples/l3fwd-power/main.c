@@ -1763,6 +1763,9 @@ main_telemetry_loop(__rte_unused void *dummy)
 			rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
 		}
 
+		// rte_pause();
+		// rte_delay_us(1);
+
 		// printf("___ cycling in while!\n"); // this happens ! 
 	}
 
