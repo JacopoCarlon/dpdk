@@ -356,6 +356,7 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 	struct pmd_core_cfg *lcore_conf;
 	const bool empty = nb_rx == 0;
 	const uint32_t duration = rte_power_pmd_mgmt_get_pause_duration();
+	const uint64_t durationIn64 = (uint64_t)duration;
 
 	lcore_conf = RTE_LCORE_VAR(lcore_cfgs);
 
@@ -382,12 +383,14 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 			rte_power_pause(wait_tsc);
 		} else {
 			//	printf("!!! ... clb_pause -> rte_pause which is _mmpause \n ");
-			uint64_t i;
+			// 	uint64_t i;
 			//	//	for (i = 0; i < global_data.pause_per_us * duration; i++)
 			//	//		rte_pause();
 
-			for (i = 0; i < global_data.pause_per_ns * duration; i++)
-				rte_pause();
+			const uint64_t start = rte_get_timer_cycles();
+			const uint64_t ticks = (uint64_t)durationIn64 * rte_get_timer_hz() / 1E9;
+			while ((rte_get_timer_cycles() - start) < ticks)
+			    rte_pause();
 		}
 	}
 
