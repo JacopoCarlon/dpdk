@@ -335,15 +335,15 @@ clb_umwait(uint16_t port_id, uint16_t qidx, struct rte_mbuf **pkts __rte_unused,
 
 
 
-// !!! this code is used to allow pmd-pause to use ns pauses.
-void
-j_rte_delay_ns_block(unsigned int ns)
-{
-    const uint64_t start = rte_get_timer_cycles();
-    const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
-    while ((rte_get_timer_cycles() - start) < ticks)
-        rte_pause();
-}
+// !!! this code is used to allow pmd-pause to use ns pauses, code is usable in examples/l3fwd-power/main.c
+// // void
+// // j_rte_delay_ns_block(unsigned int ns)
+// // {
+// //     const uint64_t start = rte_get_timer_cycles();
+// //     const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
+// //     while ((rte_get_timer_cycles() - start) < ticks)
+// //         rte_pause();
+// // }
 
 
 
@@ -373,8 +373,6 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 
 		/* sleep for 1 microsecond, use tpause if we have it */
 		
-		uint64_t pauses_per_nanosecond = global_data.pause_per_us / 1000;
-
 		// printf("!!! --- clb_pause : entering rte_power_pause or rte_pause, using pause_per_ns !!!\n");
 		if (global_data.intrinsics_support.power_pause) {
 			printf("!!! --- clb_pause -> rte_power_pause - about to execute the weird assembly tpause\n") ;
