@@ -27,6 +27,7 @@ static struct pmd_conf_data {
 	struct rte_cpu_intrinsics intrinsics_support;
 	/** pre-calculated tsc diff for 1us */
 	uint64_t tsc_per_us;
+	uint64_t tsc_per_ns;
 	/** how many rte_pause can we fit in a microsecond? */
 	uint64_t pause_per_us;
 	uint64_t pause_per_ns;
@@ -184,6 +185,7 @@ calc_tsc(void)
 	const uint64_t tsc_per_us = hz / US_PER_S; /* 1us */
 
 	global_data.tsc_per_us = tsc_per_us;
+	global_data.tsc_per_ns = tsc_per_us/1000;
 
 	/* only do this if we don't have tpause */
 	if (!global_data.intrinsics_support.power_pause) {
