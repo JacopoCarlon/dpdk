@@ -953,13 +953,16 @@ power_freq_scaleup_heuristic(unsigned lcore_id,
 
 // --------------------------------------------------------------------
 
+// --------------------------------------------------------------------
+
+// --------------------------------------------------------------------
 
 
 
 
 
 void
-rte_delay_ns_block(unsigned int ns)
+j_rte_delay_ns_block(unsigned int ns)
 {
     const uint64_t start = rte_get_timer_cycles();
     const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
@@ -970,6 +973,11 @@ rte_delay_ns_block(unsigned int ns)
 
 
 
+// --------------------------------------------------------------------
+
+// --------------------------------------------------------------------
+
+// --------------------------------------------------------------------
 
 
 
@@ -1406,6 +1414,7 @@ start_rx:
 				if (woke_with_packets == 0) {
 					// awoken with timeout, execute grace polling
 					for (uint32_t g = 0; g < tstate->grace_poll_count; g++) {
+						// j_rte_delay_ns_block(tstate->grace_poll_interval_us)
 						rte_delay_us(tstate->grace_poll_interval_us);
 						for (i = 0; i < qconf->n_rx_queue; ++i) {
 							rx_queue = &(qconf->rx_queue_list[i]);
@@ -1429,6 +1438,7 @@ start_rx:
 			} else {
 				/* Adaptive polling sleep */
 				rte_delay_us(sleep_time_us);
+				// j_rte_delay_ns_block(sleep_time_us);
 			}
 		}
 	}
@@ -1785,7 +1795,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 		// --- --- test relaxing busypolling --- --- 
 		// rte_pause();		
 		// rte_delay_us(1);
-		// rte_delay_ns_block(30);
+		// j_rte_delay_ns_block(30);
 
 
 		// printf("___ cycling in while!\n"); // this happens ! 
@@ -1980,6 +1990,7 @@ start_rx:
 				 */
 				//printf("DBG legacy ---> going to sleep for %d microseconds \n", lcore_idle_hint);
 				rte_delay_us(lcore_idle_hint);
+				// j_rte_delay_ns_block(1000*lcore_idle_hint);
 			}
 			else {
 				//printf("DBG legacy --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);

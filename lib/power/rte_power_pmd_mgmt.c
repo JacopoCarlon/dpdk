@@ -29,6 +29,7 @@ static struct pmd_conf_data {
 	uint64_t tsc_per_us;
 	/** how many rte_pause can we fit in a microsecond? */
 	uint64_t pause_per_us;
+	uint64_t pause_per_ns;
 } global_data;
 
 /**
@@ -201,6 +202,7 @@ calc_tsc(void)
 		us_per_pause = us / n_pauses;
 
 		global_data.pause_per_us = (uint64_t)(1.0 / us_per_pause);
+		global_data.pause_per_ns = global_data.pause_per_us/1000;
 	}
 }
 
@@ -329,6 +331,20 @@ clb_umwait(uint16_t port_id, uint16_t qidx, struct rte_mbuf **pkts __rte_unused,
 	return nb_rx;
 }
 
+
+
+// !!! this code is used to allow pmd-pause to use ns pauses.
+void
+j_rte_delay_ns_block(unsigned int ns)
+{
+    const uint64_t start = rte_get_timer_cycles();
+    const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
+    while ((rte_get_timer_cycles() - start) < ticks)
+        rte_pause();
+}
+
+
+
 static uint16_t
 clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 		struct rte_mbuf **pkts __rte_unused, uint16_t nb_rx,
@@ -355,17 +371,22 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 
 		/* sleep for 1 microsecond, use tpause if we have it */
 		
-		// printf("!!! --- clb_pause : entering rte_power_pause or rte_pause\n");
+		uint64_t pauses_per_nanosecond = global_data.pause_per_us / 1000;
+
+		printf("!!! --- clb_pause : entering rte_power_pause or rte_pause, using pause_per_ns !!!\n");
 		if (global_data.intrinsics_support.power_pause) {
 			printf("!!! --- clb_pause -> rte_power_pause - about to execute the weird assembly tpause\n") ;
 			const uint64_t cur = rte_rdtsc();
-			const uint64_t wait_tsc =
-				cur + global_data.tsc_per_us * duration;
+			// const uint64_t wait_tsc = cur + global_data.tsc_per_us * duration;
+			const uint64_t wait_tsc = cur + global_data.tsc_per_ns * duration;
 			rte_power_pause(wait_tsc);
 		} else {
 			//	printf("!!! ... clb_pause -> rte_pause which is _mmpause \n ");
 			uint64_t i;
-			for (i = 0; i < global_data.pause_per_us * duration; i++)
+			//	//	for (i = 0; i < global_data.pause_per_us * duration; i++)
+			//	//		rte_pause();
+
+			for (i = 0; i < global_data.pause_per_ns * duration; i++)
 				rte_pause();
 		}
 	}
