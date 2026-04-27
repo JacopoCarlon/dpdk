@@ -2316,12 +2316,15 @@ print_usage(const char *prgname)
 		" wait before entering sleep state\n"
 		"  --pause-duration DURATION: set the duration, in microseconds,"
 		" of the pause callback\n"
+		"  --busypolling_pause_duration_ns DURATION: set the duration for baseline, in nanosecond, of pause"
+		" of the pause callback\n"
 		"  --scale-freq-min FREQ_MIN: set minimum frequency for scaling mode for"
 		" all application lcores (FREQ_MIN must be in kHz, in increments of 100MHz)\n"
 		"  --scale-freq-max FREQ_MAX: set maximum frequency for scaling mode for"
 		" all application lcores (FREQ_MAX must be in kHz, in increments of 100MHz)\n",
 		prgname);
 }
+
 
 /*
  * Caller must give the right upper limit so as to ensure receiver variable
