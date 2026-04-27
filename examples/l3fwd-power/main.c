@@ -2592,8 +2592,7 @@ parse_args(int argc, char **argv)
 		{CMD_LINE_OPT_PMD_MGMT, 1, 0, 0},
 		{CMD_LINE_OPT_MAX_EMPTY_POLLS, 1, 0, 0},
 		{CMD_LINE_OPT_PAUSE_DURATION, 1, 0, 0},
-		// jj busypolling pause
-		{CMD_LINE_OPT_BUSYPOLLING_PAUSE_DURATION_NS, 1, 0, 0}	
+		{CMD_LINE_OPT_BUSYPOLLING_PAUSE_DURATION_NS, 1, 0, 0}, // jj busypolling pause
 		{CMD_LINE_OPT_SCALE_FREQ_MIN, 1, 0, 0},
 		{CMD_LINE_OPT_SCALE_FREQ_MAX, 1, 0, 0},
 		{CMD_LINK_OPT_ETH_LINK_SPEED, 1, 0, 0},
