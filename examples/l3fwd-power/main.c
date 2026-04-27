@@ -318,6 +318,10 @@ static uint32_t pause_duration = 1;
 static uint32_t scale_freq_min;
 static uint32_t scale_freq_max;
 
+// jj 
+static uint32_t busypolling_pause_duration_ns = 30;	// default to 30 ns
+bool baseline_pause_enabled = false;
+
 // hybrid global configuration variables Jhybrid : 
 static uint32_t max_interrupt_timeout_us = 300;
 static uint32_t grace_poll_count = 100;
@@ -1808,6 +1812,157 @@ main_telemetry_loop(__rte_unused void *dummy)
 
 
 
+/* main processing loop */
+// jj 
+static int
+main_telemetry_baselinepause_loop(__rte_unused void *dummy)
+{
+	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
+	unsigned int lcore_id;
+	uint64_t prev_tsc, diff_tsc, cur_tsc, prev_tel_tsc;
+	int i, j, nb_rx;
+	uint16_t portid, queueid;
+	struct lcore_conf *qconf;
+	struct lcore_rx_queue *rx_queue;
+	uint64_t ep_nep[2] = {0}, fp_nfp[2] = {0};
+	uint64_t poll_count;
+	enum busy_rate br;
+
+	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
+					US_PER_S * BURST_TX_DRAIN_US;
+
+	poll_count = 0;
+	prev_tsc = 0;
+	prev_tel_tsc = 0;
+
+	lcore_id = rte_lcore_id();
+	qconf = &lcore_conf[lcore_id];
+
+	printf("main_telemetry_baselinepause_loop: entered\n");
+	printf("---> targetting baseline with pause of duration %u ns !!!\n\n", busypolling_pause_duration_ns);
+
+	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n", pmgmt_type);
+	if (baseline_enabled){
+		printf("main_telemetry_baselinepause_loop running baseline\n");
+	}
+
+
+	if (qconf->n_rx_queue == 0) {
+		RTE_LOG(INFO, L3FWD_POWER, "lcore %u has nothing to do\n",
+			lcore_id);
+		printf("returning 0 from main_telemetry_baselinepause_loop, since the number of receiver queues selected was 0.\n");
+		return 0;
+	}
+
+	RTE_LOG(INFO, L3FWD_POWER, "entering main main_telemetry_baselinepause_loop loop on lcore %u\n",
+		lcore_id);
+
+	for (i = 0; i < qconf->n_rx_queue; i++) {
+		portid = qconf->rx_queue_list[i].port_id;
+		queueid = qconf->rx_queue_list[i].queue_id;
+		RTE_LOG(INFO, L3FWD_POWER, " -- lcoreid=%u portid=%u "
+			"rxqueueid=%" PRIu16 "\n", lcore_id, portid, queueid);
+	}
+
+	printf("main_telemetry_baselinepause_loop: _done for, entering while \n");
+	
+
+	while (!is_done()) {
+
+		// printf("___ drain tx queue\n"); // this happens !
+		cur_tsc = rte_rdtsc();
+		/*
+		 * TX burst queue drain
+		 */
+		diff_tsc = cur_tsc - prev_tsc;
+		if (unlikely(diff_tsc > drain_tsc)) {
+			for (i = 0; i < qconf->n_tx_port; ++i) {
+				portid = qconf->tx_port_id[i];
+				rte_eth_tx_buffer_flush(portid,
+						qconf->tx_queue_id[portid],
+						qconf->tx_buffer[portid]);
+			}
+			prev_tsc = cur_tsc;
+		}
+
+		/*
+		 * Read packet from RX queues
+		 */
+
+		// printf("___ receive from rx queue\n"); // this happens !
+		for (i = 0; i < qconf->n_rx_queue; ++i) {
+			rx_queue = &(qconf->rx_queue_list[i]);
+			portid = rx_queue->port_id;
+			queueid = rx_queue->queue_id;
+
+			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,
+								MAX_PKT_BURST);
+			ep_nep[nb_rx == 0]++;
+			fp_nfp[nb_rx == MAX_PKT_BURST]++;
+			poll_count++;
+			if (unlikely(nb_rx == 0))
+				continue;
+
+			/* Prefetch first packets */
+			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
+				rte_prefetch0(rte_pktmbuf_mtod(
+						pkts_burst[j], void *));
+			}
+
+			/* Prefetch and forward already prefetched packets */
+			for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
+				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
+						j + PREFETCH_OFFSET], void *));
+				l3fwd_simple_forward(pkts_burst[j], portid,
+								qconf);
+			}
+
+			/* Forward remaining prefetched packets */
+			for (; j < nb_rx; j++) {
+				l3fwd_simple_forward(pkts_burst[j], portid,
+								qconf);
+			}
+		}
+		if (unlikely(poll_count >= DEFAULT_COUNT)) {
+			diff_tsc = cur_tsc - prev_tel_tsc;
+			if (diff_tsc >= MAX_CYCLES) {
+				br = FULL;
+			} else if (diff_tsc > MIN_CYCLES &&
+					diff_tsc < MAX_CYCLES) {
+				br = (diff_tsc * 100) / MAX_CYCLES;
+			} else {
+				br = ZERO;
+			}
+			poll_count = 0;
+			prev_tel_tsc = cur_tsc;
+			/* update stats for telemetry */
+			rte_spinlock_lock(&stats[lcore_id].telemetry_lock);
+			stats[lcore_id].ep_nep[0] = ep_nep[0];
+			stats[lcore_id].ep_nep[1] = ep_nep[1];
+			stats[lcore_id].fp_nfp[0] = fp_nfp[0];
+			stats[lcore_id].fp_nfp[1] = fp_nfp[1];
+			stats[lcore_id].br = br;
+			rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
+		}
+
+
+		// --- --- test relaxing busypolling --- --- 
+		// rte_pause();		
+		// rte_delay_us(1);
+		j_rte_delay_ns_block(busypolling_pause_duration_ns);
+
+		// printf("___ cycling in while!\n"); // this happens ! 
+	}
+
+	return 0;
+}
+
+
+
+
+
+
+
 // --------------------------------------------------------------------
 
 
@@ -2386,6 +2541,9 @@ parse_pmd_mgmt_config(const char *name)
 #define CMD_LINE_OPT_CPU_RESUME_LATENCY "cpu-resume-latency"
 #define CMD_LINK_OPT_ETH_LINK_SPEED "eth-link-speed"
 
+// jj
+#define CMD_LINE_OPT_BUSYPOLLING_PAUSE_DURATION_NS "busypolling_pause_duration_ns"
+
 // hybrid command-line macros for configuration variables Jhybrid : 
 #define CMD_LINE_OPT_HYBRID "hybrid"
 #define CMD_LINE_OPT_MAX_INTERRUPT_TIMEOUT "max-interrupt-timeout"
@@ -2431,6 +2589,8 @@ parse_args(int argc, char **argv)
 		{CMD_LINE_OPT_PMD_MGMT, 1, 0, 0},
 		{CMD_LINE_OPT_MAX_EMPTY_POLLS, 1, 0, 0},
 		{CMD_LINE_OPT_PAUSE_DURATION, 1, 0, 0},
+		// jj busypolling pause
+		{CMD_LINE_OPT_BUSYPOLLING_PAUSE_DURATION_NS, 1, 0, 0}	
 		{CMD_LINE_OPT_SCALE_FREQ_MIN, 1, 0, 0},
 		{CMD_LINE_OPT_SCALE_FREQ_MAX, 1, 0, 0},
 		{CMD_LINK_OPT_ETH_LINK_SPEED, 1, 0, 0},
@@ -2677,6 +2837,15 @@ parse_args(int argc, char **argv)
 				if (parse_uint(optarg, UINT32_MAX, &pause_duration) != 0)
 					return -1;
 				printf("Pause duration configured\n");
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+					CMD_LINE_OPT_BUSYPOLLING_PAUSE_DURATION_NS,
+					sizeof(CMD_LINE_OPT_BUSYPOLLING_PAUSE_DURATION_NS))) {
+				if (parse_uint(optarg, UINT32_MAX, &busypolling_pause_duration_ns) != 0)
+					return -1;
+				baseline_pause_enabled = true;
+				printf("Selected BusyPolling with pause in nanoSeconds !!!\n");
 			}
 
 			if (!strncmp(lgopts[option_index].name,
@@ -3825,8 +3994,14 @@ main(int argc, char **argv)
 	} 
 	else if (app_mode == APP_MODE_PMD_MGMT) {
 		/* reuse telemetry loop for PMD power management mode */
-		printf("main _ chosen mode is : APP_MODE_PMD_MGMT\n");
-		rte_eal_mp_remote_launch(main_telemetry_loop, NULL, CALL_MAIN);
+		if (baseline_pause_enabled == true){
+			rte_eal_mp_remote_launch(main_telemetry_baselinepause_loop, NULL, CALL_MAIN);
+			printf("main _ chosen mode is : APP_MODE_PMD_MGMT baseline, with ns pause !!!! main_telemetry_baselinepause_loop !!!! \n");
+		}
+		else{
+			printf("main _ chosen mode is : APP_MODE_PMD_MGMT\n");
+			rte_eal_mp_remote_launch(main_telemetry_loop, NULL, CALL_MAIN);
+		}
 	}
 
 	printf("main _ done launching selected mode.\n");
