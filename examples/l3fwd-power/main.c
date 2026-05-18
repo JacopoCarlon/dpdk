@@ -314,12 +314,12 @@ static struct rte_eth_conf port_conf = {
 
 static uint32_t max_pkt_len;
 static uint32_t max_empty_polls = 512;
-static uint32_t pause_duration = 1;
+static uint32_t pause_duration = 200;		// this value is in nanoseconds, should default to 200ns
 static uint32_t scale_freq_min;
 static uint32_t scale_freq_max;
 
 // jj 
-static uint32_t busypolling_pause_duration_ns = 30;	// default to 30 ns
+static uint32_t busypolling_pause_duration_ns = 50;	// default to 50 ns
 bool baseline_pause_enabled = false;
 
 // hybrid global configuration variables Jhybrid : 
@@ -1821,6 +1821,7 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 	unsigned int lcore_id;
 	uint64_t prev_tsc, diff_tsc, cur_tsc, prev_tel_tsc;
 	int i, j, nb_rx;
+	int tot_nb_rx = 0;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
@@ -1838,8 +1839,9 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
 
-	printf("main_telemetry_baselinepause_loop: entered\n");
+	printf("\n\n --- --- main_telemetry_baselinepause_loop: entered --- --- \n");
 	printf("---> targetting baseline with pause of duration %u ns !!!\n\n", busypolling_pause_duration_ns);
+	printf("executing pause only if all queues returned empty.\n");
 
 	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n", pmgmt_type);
 	if (baseline_enabled){
@@ -1890,6 +1892,7 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 		 */
 
 		// printf("___ receive from rx queue\n"); // this happens !
+		tot_nb_rx = 0;
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			portid = rx_queue->port_id;
@@ -1902,6 +1905,8 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 			poll_count++;
 			if (unlikely(nb_rx == 0))
 				continue;
+
+			tot_nb_rx += nb_rx;
 
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
@@ -1923,33 +1928,37 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 								qconf);
 			}
 		}
-		if (unlikely(poll_count >= DEFAULT_COUNT)) {
-			diff_tsc = cur_tsc - prev_tel_tsc;
-			if (diff_tsc >= MAX_CYCLES) {
-				br = FULL;
-			} else if (diff_tsc > MIN_CYCLES &&
-					diff_tsc < MAX_CYCLES) {
-				br = (diff_tsc * 100) / MAX_CYCLES;
-			} else {
-				br = ZERO;
-			}
-			poll_count = 0;
-			prev_tel_tsc = cur_tsc;
-			/* update stats for telemetry */
-			rte_spinlock_lock(&stats[lcore_id].telemetry_lock);
-			stats[lcore_id].ep_nep[0] = ep_nep[0];
-			stats[lcore_id].ep_nep[1] = ep_nep[1];
-			stats[lcore_id].fp_nfp[0] = fp_nfp[0];
-			stats[lcore_id].fp_nfp[1] = fp_nfp[1];
-			stats[lcore_id].br = br;
-			rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
+
+		if (unlikely(tot_nb_rx == 0)) {
+			// if we received no packets from any queue, then we execute the pause.
+			// --- --- test relaxing busypolling --- --- 
+			// rte_pause();		
+			// rte_delay_us(1);
+			j_rte_delay_ns_block(busypolling_pause_duration_ns);
 		}
 
-
-		// --- --- test relaxing busypolling --- --- 
-		// rte_pause();		
-		// rte_delay_us(1);
-		j_rte_delay_ns_block(busypolling_pause_duration_ns);
+		// no need for telemetry data.
+		// // if (unlikely(poll_count >= DEFAULT_COUNT)) {
+		// // 	diff_tsc = cur_tsc - prev_tel_tsc;
+		// // 	if (diff_tsc >= MAX_CYCLES) {
+		// // 		br = FULL;
+		// // 	} else if (diff_tsc > MIN_CYCLES &&
+		// // 			diff_tsc < MAX_CYCLES) {
+		// // 		br = (diff_tsc * 100) / MAX_CYCLES;
+		// // 	} else {
+		// // 		br = ZERO;
+		// // 	}
+		// // 	poll_count = 0;
+		// // 	prev_tel_tsc = cur_tsc;
+		// // 	/* update stats for telemetry */
+		// // 	rte_spinlock_lock(&stats[lcore_id].telemetry_lock);
+		// // 	stats[lcore_id].ep_nep[0] = ep_nep[0];
+		// // 	stats[lcore_id].ep_nep[1] = ep_nep[1];
+		// // 	stats[lcore_id].fp_nfp[0] = fp_nfp[0];
+		// // 	stats[lcore_id].fp_nfp[1] = fp_nfp[1];
+		// // 	stats[lcore_id].br = br;
+		// // 	rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
+		// // }
 
 		// printf("___ cycling in while!\n"); // this happens ! 
 	}
@@ -2314,7 +2323,7 @@ print_usage(const char *prgname)
 		"Currently supported modes: baseline, monitor, pause, scale\n"
 		"  --max-empty-polls MAX_EMPTY_POLLS: number of empty polls to"
 		" wait before entering sleep state\n"
-		"  --pause-duration DURATION: set the duration, in microseconds,"
+		"  --pause-duration DURATION: set the duration, in nanoseconds,"
 		" of the pause callback\n"
 		"  --busypolling_pause_duration_ns DURATION: set the duration for baseline, in nanosecond, of pause"
 		" of the pause callback\n"
