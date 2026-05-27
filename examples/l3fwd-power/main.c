@@ -970,7 +970,7 @@ j_rte_delay_ns_block(unsigned int ns)
 {
     const uint64_t start = rte_get_timer_cycles();
     const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
-    while ((rte_get_timer_cycles() - start) < ticks)
+    do ((rte_get_timer_cycles() - start) < ticks) while
         rte_pause();
 }
 
@@ -1715,6 +1715,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 	}
 
 	printf("_main_telemetry_loop: _done for, entering while \n");
+	printf("\n\n !!!- this is the pure baseline with the single mm_pause. --- !!! \n\n");
 	
 
 	while (!is_done()) {
@@ -1773,34 +1774,37 @@ main_telemetry_loop(__rte_unused void *dummy)
 								qconf);
 			}
 		}
-		if (unlikely(poll_count >= DEFAULT_COUNT)) {
-			diff_tsc = cur_tsc - prev_tel_tsc;
-			if (diff_tsc >= MAX_CYCLES) {
-				br = FULL;
-			} else if (diff_tsc > MIN_CYCLES &&
-					diff_tsc < MAX_CYCLES) {
-				br = (diff_tsc * 100) / MAX_CYCLES;
-			} else {
-				br = ZERO;
-			}
-			poll_count = 0;
-			prev_tel_tsc = cur_tsc;
-			/* update stats for telemetry */
-			rte_spinlock_lock(&stats[lcore_id].telemetry_lock);
-			stats[lcore_id].ep_nep[0] = ep_nep[0];
-			stats[lcore_id].ep_nep[1] = ep_nep[1];
-			stats[lcore_id].fp_nfp[0] = fp_nfp[0];
-			stats[lcore_id].fp_nfp[1] = fp_nfp[1];
-			stats[lcore_id].br = br;
-			rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
-		}
+		
+		
+		// !! - execute a single <rte_pause == _mm_pause > inside the busy loop . 
+		rte_pause();		
 
+		// disable telemetry in busy polling for performance obv
+		// // //	if (unlikely(poll_count >= DEFAULT_COUNT)) {
+		// // //		diff_tsc = cur_tsc - prev_tel_tsc;
+		// // //		if (diff_tsc >= MAX_CYCLES) {
+		// // //			br = FULL;
+		// // //		} else if (diff_tsc > MIN_CYCLES &&
+		// // //				diff_tsc < MAX_CYCLES) {
+		// // //			br = (diff_tsc * 100) / MAX_CYCLES;
+		// // //		} else {
+		// // //			br = ZERO;
+		// // //		}
+		// // //		poll_count = 0;
+		// // //		prev_tel_tsc = cur_tsc;
+		// // //		/* update stats for telemetry */
+		// // //		rte_spinlock_lock(&stats[lcore_id].telemetry_lock);
+		// // //		stats[lcore_id].ep_nep[0] = ep_nep[0];
+		// // //		stats[lcore_id].ep_nep[1] = ep_nep[1];
+		// // //		stats[lcore_id].fp_nfp[0] = fp_nfp[0];
+		// // //		stats[lcore_id].fp_nfp[1] = fp_nfp[1];
+		// // //		stats[lcore_id].br = br;
+		// // //		rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
+		// // //	}
 
 		// --- --- test relaxing busypolling --- --- 
-		// rte_pause();		
 		// rte_delay_us(1);
 		// j_rte_delay_ns_block(30);
-
 
 		// printf("___ cycling in while!\n"); // this happens ! 
 	}
@@ -1929,13 +1933,13 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 			}
 		}
 
-		if (unlikely(tot_nb_rx == 0)) {
-			// if we received no packets from any queue, then we execute the pause.
-			// --- --- test relaxing busypolling --- --- 
-			// rte_pause();		
-			// rte_delay_us(1);
-			j_rte_delay_ns_block(busypolling_pause_duration_ns);
-		}
+		rte_pause();		
+		//	if (unlikely(tot_nb_rx == 0)) {
+		//		// if we received no packets from any queue, then we execute the pause.
+		//		// --- --- test relaxing busypolling --- --- 
+		//		// rte_delay_us(1);
+		//		j_rte_delay_ns_block(busypolling_pause_duration_ns);
+		//	}
 
 		// no need for telemetry data.
 		// // if (unlikely(poll_count >= DEFAULT_COUNT)) {
