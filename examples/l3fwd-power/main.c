@@ -970,8 +970,10 @@ j_rte_delay_ns_block(unsigned int ns)
 {
     const uint64_t start = rte_get_timer_cycles();
     const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
-    do ((rte_get_timer_cycles() - start) < ticks) while
-        rte_pause();
+    do {
+		rte_pause();
+	} 
+	while ((rte_get_timer_cycles() - start) < ticks);
 }
 
 
