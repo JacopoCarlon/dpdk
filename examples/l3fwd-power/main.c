@@ -1436,6 +1436,8 @@ start_rx:
 
 			// we most likely are in off phase, let's see if we can interrupt with timeout
 			
+			uint64_t timeout_cycles = tstate->min_sleep_cycles; 
+
 			// I want the too_late_to_interrupt check to override any forced interrupt, because yes.
 			// This means i need to calculate this always..
 			bool enough_time_to_intr = false;
@@ -1469,7 +1471,7 @@ start_rx:
 				}
 
 				uint64_t timeout_us = (timeout_cycles * 1000000ULL) / tsc_hz;
-				uint64_t timeout_ms = (int)((timeout_us + 999) / 1000);
+				uint64_t timeout_ms = ((timeout_us + 999) / 1000);
 
 				turn_on_off_intr(qconf, 1);
 				// sleep_with_timeout returns 0 if woke with timeout, 
