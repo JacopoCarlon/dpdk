@@ -1271,8 +1271,8 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	tstate->phase_start_tsc = rte_get_tsc_cycles();
 	tstate->tsc_hz = rte_get_tsc_hz();
 	tstate->last_packet_tsc = tstate->phase_start_tsc;
-	tstate->avg_on_duration = 100 * tsc_hz / 1e6;
-	tstate->avg_off_duration = 100 * tsc_hz / 1e6;
+	tstate->avg_on_duration = 100 * tstate->tsc_hz / 1e6;
+	tstate->avg_off_duration = 100 * tstate->tsc_hz / 1e6;
 	// Copy configuration for fast access
 	tstate->max_intr_timeout = max_interrupt_timeout_us;
 	tstate->grace_poll_count = grace_poll_count;
@@ -1326,10 +1326,6 @@ start_rx:
 		*/
 	
 		packets_received = false;
-
-		// setup state parameters that are used to update traffic. 
-		// we shall consider that they don't change during a single iteration (e.g. cpu freq)
-		tstate->tsc_hz = rte_get_tsc_hz();
 
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
