@@ -1225,6 +1225,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
+	bool intr_en = false;
 	
 	printf("--- Entered main intr loop !!! \n");
 	
@@ -1254,11 +1255,13 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 			lcore_id, portid, queueid);
 		}
 		
-	/* add into event wait list */
-	if (event_register(qconf) == 0)
-	intr_en = 1;
-	else
-	RTE_LOG(INFO, L3FWD_POWER, "RX interrupt won't enable.\n");
+	
+	/* add hardwareInterrupt into event wait list */
+	intr_en = (event_register(qconf) == 0);
+	if (unlikely(!intr_en)){
+		// not ideal..
+		RTE_LOG(INFO, L3FWD_POWER, "hybrid RX interrupt won't enable, not ideal.\n\n");
+	}
 		
 		
 	// J : Initialize traffic state
@@ -1294,10 +1297,8 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	printf("tstate->min_small_sleep_us : %u\n", 		tstate->min_small_sleep_us);
 	printf("tstate->no_pkt_ts_off : %u\n", 				tstate->no_pkt_ts_off);
 
-	printf("congratulations, let's start working !!! -----------------\n");
+	printf("congratulations hybrid, let's start working !!! -----------------\n");
 
-	uint32_t lcore_rx_idle_count = 0;
-	int intr_en = 0;
 	bool packets_received = false;
 
 	while (!is_done()) {
@@ -1323,7 +1324,7 @@ start_rx:
 		/*
 		* Read packet from RX queues
 		*/
-		lcore_rx_idle_count = 0;
+	
 		packets_received = false;
 
 		// setup state parameters that are used to update traffic. 
@@ -1351,30 +1352,24 @@ start_rx:
 				}
 				// this is the same logic as interruptOnly:
 				rx_queue->idle_hint = power_idle_heuristic(rx_queue->zero_rx_packet_count);
-				lcore_rx_idle_count++;
 			} else {
 				rx_queue->zero_rx_packet_count = 0;
 			}
 
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
-				rte_prefetch0(rte_pktmbuf_mtod(
-						pkts_burst[j], void *));
+				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j], void *));
 			}
 
 			/* Prefetch and forward already prefetched packets */
 			for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
-				rte_prefetch0(rte_pktmbuf_mtod(
-						pkts_burst[j + PREFETCH_OFFSET],
-						void *));
-				l3fwd_simple_forward(
-						pkts_burst[j], portid, qconf);
+				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j + PREFETCH_OFFSET], void *));
+				l3fwd_simple_forward(pkts_burst[j], portid, qconf);
 			}
 
 			/* Forward remaining prefetched packets */
 			for (; j < nb_rx; j++) {
-				l3fwd_simple_forward(
-						pkts_burst[j], portid, qconf);
+				l3fwd_simple_forward(pkts_burst[j], portid, qconf);
 			}
 		}
 
@@ -1385,25 +1380,25 @@ start_rx:
 		// // }
 
 		/* Hybrid sleep decision logic */
+		// start hybrid if all queues returned empty
 		if (unlikely(lcore_rx_idle_count == qconf->n_rx_queue)) {
 			bool use_interrupt = false;
 			uint64_t sleep_time_us = 1;
 
 			const bool force_interrupt = tstate->consecutive_empty >= tstate->min_cons_empty_for_intr;
 
-			const uint64_t tsc_hz = rte_get_tsc_hz();
 			const bool pattern_suggests_off = !tstate->in_on_phase && 
-                                (tstate->avg_off_duration > (tstate->no_pkt_ts_off * tsc_hz / 1000000));
+                                (tstate->avg_off_duration > (tstate->no_pkt_ts_off * tstate->tsc_hz / 1000000));
 			// off if more than 500 nanoseconds (us)
 			const uint64_t current_tsc = rte_rdtsc();
 			const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
-			const uint64_t worst_wake_cycles = tstate->worst_wake_up_us * tsc_hz / 1e6;
+			const uint64_t worst_wake_cycles = tstate->worst_wake_up_us * tstate->tsc_hz / 1e6;
 			const bool too_late_to_intr = time_since_last > (tstate->avg_off_duration - worst_wake_cycles);
 			
 
 			if (!too_late_to_intr && (force_interrupt || pattern_suggests_off) && intr_en) {
 				/* Interrupt mode with timeout */
-				uint64_t avg_off_us = tstate->avg_off_duration * 1000000 / tsc_hz;
+				uint64_t avg_off_us = tstate->avg_off_duration * 1000000 / tstate->tsc_hz;
 				uint64_t timeout_us = RTE_MIN((uint64_t)tstate->max_intr_timeout, avg_off_us);
 
 				turn_on_off_intr(qconf, 1);
