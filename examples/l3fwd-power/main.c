@@ -1143,11 +1143,10 @@ static int sleep_with_timeout(int num, uint64_t timeout_ms)
 //	(since all is discrete, we either are on or off ..tertium non datur)
 static void update_traffic_state(uint64_t current_tsc, bool packet_received, struct traffic_state *tstate)
 {
-    const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
-
-    if (packet_received) {
-        if (!tstate->in_on_phase) {
-            // Transition to ON phase
+	
+	if (packet_received) {
+		if (!tstate->in_on_phase) {
+			// Transition to ON phase
             const uint64_t off_duration = current_tsc - tstate->phase_start_tsc;
             tstate->avg_off_duration = (tstate->avg_off_duration * 3 + off_duration) >> 2;
             tstate->phase_start_tsc = current_tsc;
@@ -1157,6 +1156,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
         tstate->consecutive_empty = 0;
         tstate->suggested_sleep_cycles =  tstate->default_min_sleep_duration_cycles; // ~1 µs
     } else {
+		const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
         if (tstate->in_on_phase && (time_since_last > tstate->avg_off_duration)) {
             // Transition to OFF phase
             const uint64_t on_duration = current_tsc - tstate->phase_start_tsc;
@@ -1293,6 +1293,9 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	memset(tstate, 0, sizeof(*tstate));
 
 	const uint64_t tsc_hz = rte_get_tsc_hz();
+	// minimum 1 tsc_per_ms, needed for conversion in interrupt-path :-)
+	uint64_t tsc_per_ms = (tsc_hz + 999) / 1000;
+	
 	tstate->tsc_hz = tsc_hz;
 	tstate->phase_start_tsc = rte_get_tsc_cycles();
 	tstate->last_packet_tsc = tstate->phase_start_tsc;
@@ -1330,7 +1333,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 
 	printf("congratulations hybrid, let's start working !!! -----------------\n");
 
-	bool packets_received = false;
+	bool packets_received;
 
 	while (!is_done()) {
 		stats[lcore_id].nb_iteration_looped++;
@@ -1366,9 +1369,6 @@ start_rx:
 			queueid = rx_queue->queue_id;
 
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
-
-			// packets_received |= (nb_rx > 0);
-
 			
 			stats[lcore_id].nb_rx_processed += nb_rx;
 			if (unlikely(nb_rx == 0)) {
@@ -1407,12 +1407,7 @@ start_rx:
 		// consecutive_empty shall represent FULL_ITERATIONS_WITHOUT_ANY_PACKETS !!!
 		update_traffic_state(cur_tsc, packets_received, tstate);
 
-		// this is done in state update.
-		// // if (packets_received) {
-			// // 	// we have received packets, therefore consecutive_empty shall be reset to now.
-			// // 	tstate->consecutive_empty = 0;
-			// // }
-			
+
 		/* Hybrid sleep decision logic */
 		// start hybrid only if all queues returned empty
 		if (likely(lcore_rx_idle_count < qconf->n_rx_queue)){
@@ -1441,15 +1436,21 @@ start_rx:
 			// I want the too_late_to_interrupt check to override any forced interrupt, because yes.
 			// This means i need to calculate this always..
 			bool enough_time_to_intr = false;
-			const uint64_t now = rte_rdtsc();
-				uint64_t elapsed_off = now - tstate->phase_start_tsc;
-				if (tstate->avg_off_duration > elapsed_off) {
-					uint64_t remaining_off = tstate->avg_off_duration - elapsed_off;
-					if (remaining_off > tstate->worst_wake_up_cycles) {
-						enough_time_to_intr = true;
-						timeout_cycles = remaining_off;
-					}
+			
+			// using the "old" cur_tsc value acquired at the beginning of the while, 
+			// .. !! which is updated recently if we didn't enter the interrupt path ..!!
+			// -> causes the estimation of remaining_off to be slightly smaller than "real" (since elapsed_off is overshooted)
+			// this is a safe approach which i agree with.
+			//const uint64_t now = rte_rdtsc();
+
+			uint64_t elapsed_off = cur_tsc - tstate->phase_start_tsc;
+			if (tstate->avg_off_duration > elapsed_off) {
+				uint64_t remaining_off = tstate->avg_off_duration - elapsed_off;
+				if (remaining_off > tstate->worst_wake_up_cycles) {
+					enough_time_to_intr = true;
+					timeout_cycles = remaining_off;
 				}
+			}
 			
 			// // // if(enough_time_to_intr && (force_interrupt || pattern_suggests_off) && intr_en)
 			if (likely(enough_time_to_intr)) {
@@ -1470,8 +1471,9 @@ start_rx:
 					timeout_cycles = tstate->min_sleep_cycles;   
 				}
 
-				uint64_t timeout_us = (timeout_cycles * 1000000ULL) / tsc_hz;
-				uint64_t timeout_ms = ((timeout_us + 999) / 1000);
+				// // uint64_t timeout_us = (timeout_cycles * 1000000ULL) / tsc_hz;
+				// // uint64_t timeout_ms = ((timeout_us + 999) / 1000);
+				uint64_t timeout_ms = (timeout_cycles + tsc_per_ms - 1) / tsc_per_ms;
 
 				turn_on_off_intr(qconf, 1);
 				// sleep_with_timeout returns 0 if woke with timeout, 
