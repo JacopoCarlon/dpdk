@@ -1113,11 +1113,11 @@ static int event_register(struct lcore_conf *qconf)
 
 
 /* Modified sleep function with timeout */
-static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
+static int sleep_with_timeout(int num, uint64_t timeout_ms)
 {
     struct rte_epoll_event events[num];
 	int n = 0;
-    n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, events, num, timeout_us);
+    n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, events, num, timeout_ms);
 
     // // // 	uint16_t port_id, queue_id;
     // // // 	void *data;
@@ -1369,13 +1369,12 @@ start_rx:
 
 			// packets_received |= (nb_rx > 0);
 
-			update_traffic_state(cur_tsc, nb_rx > 0, tstate);
-
+			
 			stats[lcore_id].nb_rx_processed += nb_rx;
 			if (unlikely(nb_rx == 0)) {
 				// if no packets on this queue
 				rx_queue->zero_rx_packet_count++;
-
+				
 				if (rx_queue->zero_rx_packet_count <= MIN_ZERO_POLL_COUNT){
 					continue;
 				}
@@ -1387,51 +1386,71 @@ start_rx:
 				packets_received = true;
 				rx_queue->zero_rx_packet_count = 0;
 			}
-
+			
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
 				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j], void *));
 			}
-
+			
 			/* Prefetch and forward already prefetched packets */
 			for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
 				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j + PREFETCH_OFFSET], void *));
 				l3fwd_simple_forward(pkts_burst[j], portid, qconf);
 			}
-
+			
 			/* Forward remaining prefetched packets */
 			for (; j < nb_rx; j++) {
 				l3fwd_simple_forward(pkts_burst[j], portid, qconf);
 			}
 		}
+		
+		// consecutive_empty shall represent FULL_ITERATIONS_WITHOUT_ANY_PACKETS !!!
+		update_traffic_state(cur_tsc, packets_received, tstate);
 
 		// this is done in state update.
 		// // if (packets_received) {
-		// // 	// we have received packets, therefore consecutive_empty shall be reset to now.
-		// // 	tstate->consecutive_empty = 0;
-		// // }
-
+			// // 	// we have received packets, therefore consecutive_empty shall be reset to now.
+			// // 	tstate->consecutive_empty = 0;
+			// // }
+			
 		/* Hybrid sleep decision logic */
 		// start hybrid only if all queues returned empty
 		if (likely(lcore_rx_idle_count < qconf->n_rx_queue)){
 			rte_pause();
 		}
 		else{
+			if(unlikely(!intr_en)){
+				goto alt_to_intr;
+			}
+			
+			// to use interupt we need to either be in off phase officially, or apparently
 			const bool force_interrupt = tstate->consecutive_empty >= tstate->min_cons_empty_for_intr;
-
+			
 			const bool pattern_suggests_off =
-					!tstate->in_on_phase &&
-					(tstate->avg_off_duration > tstate->no_pkt_ts_off_cycles);
+							!tstate->in_on_phase &&
+							(tstate->avg_off_duration > tstate->no_pkt_ts_off_cycles);
 
-			// perhapse use curr_tsc ?
+			if (!(force_interrupt || pattern_suggests_off)){
+				goto alt_to_intr;
+			}
+
+			// we most likely are in off phase, let's see if we can interrupt with timeout
+			
+			// I want the too_late_to_interrupt check to override any forced interrupt, because yes.
+			// This means i need to calculate this always..
+			bool enough_time_to_intr = false;
 			const uint64_t now = rte_rdtsc();
-			const uint64_t time_since_last = now - tstate->last_packet_tsc;
-
-			const bool too_late_to_intr =
-					time_since_last > (tstate->avg_off_duration - tstate->worst_wake_up_cycles);
-
-			if (!too_late_to_intr && (force_interrupt || pattern_suggests_off) && intr_en) {
-				/* Interrupt path - timeout in cycles, then converted to µs */
+				uint64_t elapsed_off = now - tstate->phase_start_tsc;
+				if (tstate->avg_off_duration > elapsed_off) {
+					uint64_t remaining_off = tstate->avg_off_duration - elapsed_off;
+					if (remaining_off > tstate->worst_wake_up_cycles) {
+						enough_time_to_intr = true;
+						timeout_cycles = remaining_off;
+					}
+				}
+			
+			// // // if(enough_time_to_intr && (force_interrupt || pattern_suggests_off) && intr_en)
+			if (likely(enough_time_to_intr)) {
 
 				// firstly, flush all TX buffers before sleeping with interrupts !!!
 				for (i = 0; i < qconf->n_tx_port; ++i) {
@@ -1442,16 +1461,20 @@ start_rx:
 														);
 				}
 
-				uint64_t timeout_cycles = tstate->avg_off_duration;
-				if (timeout_cycles > tstate->max_intr_timeout_cycles)
+				// Clamp remaining-time <timeout> into allowed range
+				if (timeout_cycles > tstate->max_intr_timeout_cycles) {
 					timeout_cycles = tstate->max_intr_timeout_cycles;
+				} else if (timeout_cycles < tstate->min_sleep_cycles) {
+					timeout_cycles = tstate->min_sleep_cycles;   
+				}
 
 				uint64_t timeout_us = (timeout_cycles * 1000000ULL) / tsc_hz;
+				uint64_t timeout_ms = (int)((timeout_us + 999) / 1000);
 
 				turn_on_off_intr(qconf, 1);
 				// sleep_with_timeout returns 0 if woke with timeout, 
 				// otherwise returns the number of events that woke it up
-				int woke_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, lcore_id, timeout_us);
+				int woke_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, timeout_ms);
 				turn_on_off_intr(qconf, 0);
 
 				if (woke_with_n_packets == 0) {
@@ -1480,6 +1503,7 @@ start_rx:
 					goto start_rx;
 				}
 			} else {
+alt_to_intr:
 				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
 			}
 		}
@@ -2361,6 +2385,7 @@ print_usage(const char *prgname)
         "  --max-small-sleep US: max small sleep duration in us (default: 50)\n"
         "  --min-small-sleep US: min small sleep duration in us (default: 10)\n"
         "  --no-pkt-ts-off US: threshold for off phase detection in us (default: 500)\n",
+		"  --default-min-sleep-duration US: duration in us of default sleep for grace polling (default 1us)\n", 
 		" --pmd-mgmt MODE: enable PMD power management mode. "
 		"Currently supported modes: baseline, monitor, pause, scale\n"
 		"  --max-empty-polls MAX_EMPTY_POLLS: number of empty polls to"
@@ -2608,6 +2633,7 @@ parse_pmd_mgmt_config(const char *name)
 #define CMD_LINE_OPT_MAX_SMALL_SLEEP "max-small-sleep"
 #define CMD_LINE_OPT_MIN_SMALL_SLEEP "min-small-sleep"
 #define CMD_LINE_OPT_NO_PKT_TS_OFF "no-pkt-ts-off"
+#define CMD_LINE_OPT_DEFAULT_MIN_SLEEP_DURATION "default-min-sleep-duration"
 
 
 /* Parse the argument given in the command line of the application */
@@ -2647,6 +2673,7 @@ parse_args(int argc, char **argv)
 		{CMD_LINE_OPT_SCALE_FREQ_MIN, 1, 0, 0},
 		{CMD_LINE_OPT_SCALE_FREQ_MAX, 1, 0, 0},
 		{CMD_LINK_OPT_ETH_LINK_SPEED, 1, 0, 0},
+		{CMD_LINE_OPT_DEFAULT_MIN_SLEEP_DURATION, 1, 0, 0},
 		{NULL, 0, 0, 0}
 	};
 
@@ -2851,6 +2878,15 @@ parse_args(int argc, char **argv)
 					return -1;
 				}
 				printf("Min small sleep configured to %u us\n", min_small_sleep_us);
+			}
+
+			if (!strncmp(lgopts[option_index].name,
+						CMD_LINE_OPT_DEFAULT_MIN_SLEEP_DURATION,
+						sizeof(CMD_LINE_OPT_DEFAULT_MIN_SLEEP_DURATION))) {
+				if (parse_uint(optarg, UINT32_MAX, &default_min_sleep_duration_us) != 0)
+					return -1;
+				printf("Default min sleep duration configured to %u us\n",
+					default_min_sleep_duration_us);
 			}
 
 			if (!strncmp(lgopts[option_index].name,
