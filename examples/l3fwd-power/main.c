@@ -70,23 +70,29 @@ RTE_LOG_REGISTER(l3fwd_power_logtype, l3fwd.power, INFO);
 // hybrid per-lcore traffic_state Jhybrid :
 
 struct traffic_state {
-	uint64_t avg_on_duration;
-	uint64_t avg_off_duration;
-	uint64_t phase_start_tsc;
-	bool in_on_phase;
-	uint32_t consecutive_empty;
-	uint64_t suggested_sleep_us;
-	uint64_t last_packet_tsc; 
-	// Runtime copies of config for fast access
-	uint32_t max_intr_timeout;
-	uint32_t grace_poll_count;
-	uint32_t grace_poll_interval_us;
-	uint32_t min_cons_empty_for_intr;
-	uint64_t worst_wake_up_us;
-	uint32_t max_small_sleep_us;
-	uint32_t min_small_sleep_us;
-	uint32_t no_pkt_ts_off;
-	uint64_t tsc_hz;	// current core frequency in Hz, updated when traffic updates.
+    /* --- TSC-based (always in cycles) --- */
+    uint64_t phase_start_tsc;			// cycles
+    uint64_t last_packet_tsc;			// cycles
+    uint64_t avg_on_duration;        	// cycles
+    uint64_t avg_off_duration;       	// cycles
+    uint64_t suggested_sleep_cycles; 	// cycles (used by adaptive polling)
+	uint64_t default_min_sleep_duration_cycles;  // cycles
+    bool in_on_phase;
+
+    uint64_t tsc_hz;	// hardware invariant, set once
+
+    /* --- Pre‑computed thresholds in cycles --- */
+    uint64_t max_intr_timeout_cycles;		// cycles
+    uint64_t grace_poll_interval_cycles;	// cycles
+    uint64_t worst_wake_up_cycles;			// cycles
+    uint64_t no_pkt_ts_off_cycles;			// cycles
+    uint64_t min_sleep_cycles;				// cycles
+    uint64_t max_sleep_cycles;				// cycles
+
+    /* --- counters / counts --- */
+    uint32_t consecutive_empty;			// count
+    uint32_t grace_poll_count;      	// count
+    uint32_t min_cons_empty_for_intr;	// count
 };
 //	static struct traffic_state tstate;
 //	static rte_spinlock_t tstate_lock;
@@ -332,6 +338,7 @@ static uint64_t worst_wake_up_us = 150ULL;
 static uint32_t max_small_sleep_us = 50;
 static uint32_t min_small_sleep_us = 10;
 static uint32_t no_pkt_ts_off = 500;
+static uint32_t default_min_sleep_duration_us = 1;  
 
 static int cpu_resume_latency = -1;
 static int resume_latency_bk[RTE_MAX_LCORE];
@@ -966,18 +973,31 @@ power_freq_scaleup_heuristic(unsigned lcore_id,
 
 
 
-void
-j_rte_delay_ns_block(unsigned int ns)
-{
-    const uint64_t start = rte_get_timer_cycles();
+void j_rte_delay_ns_block(unsigned int ns){
+    const uint64_t start = rte_rdtsc();
     const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
     do {
 		rte_pause();
 	} 
-	while ((rte_get_timer_cycles() - start) < ticks);
+	while ((rte_rdtsc() - start) < ticks);
 }
 
 
+
+
+void j_rte_delay_cycles_block(uint64_t ticks){
+	const uint64_t start = rte_rdtsc();
+	do{
+		rte_pause();
+	} while ((rte_rdtsc() - start) < ticks);
+}
+
+
+
+static inline uint64_t us_to_cycles(uint64_t us, uint64_t tsc_hz)
+{
+    return (us * tsc_hz) / 1000000ULL;
+}
 
 
 // --------------------------------------------------------------------
@@ -1121,7 +1141,7 @@ static int sleep_with_timeout(int num, int lcore, uint64_t timeout_us)
 
 // J : function to dynamically understand if we are in a mostly on or mostly off phase
 //	(since all is discrete, we either are on or off ..tertium non datur)
-static void update_traffic_state(uint64_t current_tsc, bool packet_received, struct traffic_state* tstate)
+static void update_traffic_state(uint64_t current_tsc, bool packet_received, struct traffic_state *tstate)
 {
     const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
 
@@ -1135,7 +1155,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
         }
         tstate->last_packet_tsc = current_tsc;
         tstate->consecutive_empty = 0;
-        tstate->suggested_sleep_us = 1; // Aggressive polling during ON phases
+        tstate->suggested_sleep_cycles =  tstate->default_min_sleep_duration_cycles; // ~1 µs
     } else {
         if (tstate->in_on_phase && (time_since_last > tstate->avg_off_duration)) {
             // Transition to OFF phase
@@ -1145,19 +1165,22 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
             tstate->in_on_phase = false;
         }
 
-        // Calculate adaptive sleep time
+        // Calculate adaptive sleep hint in cycles
         if (tstate->in_on_phase) {
-            tstate->suggested_sleep_us = 1;
+            tstate->suggested_sleep_cycles = tstate->default_min_sleep_duration_cycles; // ~1 µs
         } else {
-            // const uint64_t avg_off_us = (tstate->avg_off_duration * 1000000ULL) / tsc_hz
-			const uint64_t avg_off_us = (tstate->avg_off_duration << 20) / tstate->tsc_hz;
-            const uint64_t min_val = RTE_MIN(avg_off_us/2, tstate->max_small_sleep_us);
-            tstate->suggested_sleep_us = RTE_MAX(min_val, tstate->min_small_sleep_us);
+            // half of expected remaining off time
+            uint64_t half_off = tstate->avg_off_duration >> 1;
+            // clamp to pre‑computed min/max cycles
+            if (half_off > tstate->max_sleep_cycles)
+                half_off = tstate->max_sleep_cycles;
+            if (half_off < tstate->min_sleep_cycles)
+                half_off = tstate->min_sleep_cycles;
+            tstate->suggested_sleep_cycles = half_off;
         }
 
         tstate->consecutive_empty++;
     }
-
 }
 
 
@@ -1226,6 +1249,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
 	bool intr_en = false;
+	uint32_t lcore_rx_idle_count = 0;
 	
 	printf("--- Entered main intr loop !!! \n");
 	
@@ -1266,22 +1290,29 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 		
 	// J : Initialize traffic state
 	struct traffic_state *tstate = &RTE_PER_LCORE(tstate);
-	
 	memset(tstate, 0, sizeof(*tstate));
+
+	const uint64_t tsc_hz = rte_get_tsc_hz();
+	tstate->tsc_hz = tsc_hz;
 	tstate->phase_start_tsc = rte_get_tsc_cycles();
-	tstate->tsc_hz = rte_get_tsc_hz();
 	tstate->last_packet_tsc = tstate->phase_start_tsc;
-	tstate->avg_on_duration = 100 * tstate->tsc_hz / 1e6;
-	tstate->avg_off_duration = 100 * tstate->tsc_hz / 1e6;
-	// Copy configuration for fast access
-	tstate->max_intr_timeout = max_interrupt_timeout_us;
-	tstate->grace_poll_count = grace_poll_count;
-	tstate->grace_poll_interval_us = grace_poll_interval_us;
-	tstate->min_cons_empty_for_intr = min_cons_empty_for_intr;
-	tstate->worst_wake_up_us = worst_wake_up_us;
-	tstate->max_small_sleep_us = max_small_sleep_us;
-	tstate->min_small_sleep_us = min_small_sleep_us;
-	tstate->no_pkt_ts_off = no_pkt_ts_off;
+
+	// Initial averages: 100 µs in cycles (integer, no float)
+	tstate->avg_on_duration  					= us_to_cycles(100ULL ,						 	tsc_hz);
+	tstate->avg_off_duration 					= us_to_cycles(100ULL ,						 	tsc_hz);
+	tstate->max_intr_timeout_cycles    			= us_to_cycles(max_interrupt_timeout_us ,		tsc_hz);
+	tstate->grace_poll_interval_cycles 			= us_to_cycles(grace_poll_interval_us ,			tsc_hz);
+	tstate->worst_wake_up_cycles       			= us_to_cycles(worst_wake_up_us ,				tsc_hz);
+	tstate->no_pkt_ts_off_cycles       			= us_to_cycles(no_pkt_ts_off ,					tsc_hz);
+	tstate->min_sleep_cycles           			= us_to_cycles(min_small_sleep_us ,				tsc_hz);
+	tstate->max_sleep_cycles           			= us_to_cycles(max_small_sleep_us ,				tsc_hz);
+	tstate->default_min_sleep_duration_cycles 	= us_to_cycles(default_min_sleep_duration_us ,	tsc_hz);
+
+	tstate->grace_poll_count           = grace_poll_count;
+	tstate->min_cons_empty_for_intr    = min_cons_empty_for_intr;
+
+	// Suggested sleep hint (will be overwritten quickly)
+	tstate->suggested_sleep_cycles = tsc_hz / 1000000ULL; // 1 µs equivalent
 	
 	printf("\n\n hybrid mode is starting, using parameters : \n");
 	printf("tstate->phase_start_tsc : %lu\n", 			tstate->phase_start_tsc);
@@ -1324,9 +1355,10 @@ start_rx:
 		/*
 		* Read packet from RX queues
 		*/
-	
-		packets_received = false;
 
+		lcore_rx_idle_count = 0;
+		
+		packets_received = false;
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			rx_queue->idle_hint = 0;
@@ -1335,12 +1367,13 @@ start_rx:
 
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
 
-			packets_received |= (nb_rx > 0);
+			// packets_received |= (nb_rx > 0);
 
 			update_traffic_state(cur_tsc, nb_rx > 0, tstate);
 
 			stats[lcore_id].nb_rx_processed += nb_rx;
-			if (unlikely(!packets_received)) {
+			if (unlikely(nb_rx == 0)) {
+				// if no packets on this queue
 				rx_queue->zero_rx_packet_count++;
 
 				if (rx_queue->zero_rx_packet_count <= MIN_ZERO_POLL_COUNT){
@@ -1348,7 +1381,10 @@ start_rx:
 				}
 				// this is the same logic as interruptOnly:
 				rx_queue->idle_hint = power_idle_heuristic(rx_queue->zero_rx_packet_count);
+				lcore_rx_idle_count++;
 			} else {
+				// if packets on this queue
+				packets_received = true;
 				rx_queue->zero_rx_packet_count = 0;
 			}
 
@@ -1376,62 +1412,75 @@ start_rx:
 		// // }
 
 		/* Hybrid sleep decision logic */
-		// start hybrid if all queues returned empty
-		if (unlikely(lcore_rx_idle_count == qconf->n_rx_queue)) {
-			bool use_interrupt = false;
-			uint64_t sleep_time_us = 1;
-
+		// start hybrid only if all queues returned empty
+		if (likely(lcore_rx_idle_count < qconf->n_rx_queue)){
+			rte_pause();
+		}
+		else{
 			const bool force_interrupt = tstate->consecutive_empty >= tstate->min_cons_empty_for_intr;
 
-			const bool pattern_suggests_off = !tstate->in_on_phase && 
-                                (tstate->avg_off_duration > (tstate->no_pkt_ts_off * tstate->tsc_hz / 1000000));
-			// off if more than 500 nanoseconds (us)
-			const uint64_t current_tsc = rte_rdtsc();
-			const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
-			const uint64_t worst_wake_cycles = tstate->worst_wake_up_us * tstate->tsc_hz / 1e6;
-			const bool too_late_to_intr = time_since_last > (tstate->avg_off_duration - worst_wake_cycles);
-			
+			const bool pattern_suggests_off =
+					!tstate->in_on_phase &&
+					(tstate->avg_off_duration > tstate->no_pkt_ts_off_cycles);
+
+			// perhapse use curr_tsc ?
+			const uint64_t now = rte_rdtsc();
+			const uint64_t time_since_last = now - tstate->last_packet_tsc;
+
+			const bool too_late_to_intr =
+					time_since_last > (tstate->avg_off_duration - tstate->worst_wake_up_cycles);
 
 			if (!too_late_to_intr && (force_interrupt || pattern_suggests_off) && intr_en) {
-				/* Interrupt mode with timeout */
-				uint64_t avg_off_us = tstate->avg_off_duration * 1000000 / tstate->tsc_hz;
-				uint64_t timeout_us = RTE_MIN((uint64_t)tstate->max_intr_timeout, avg_off_us);
+				/* Interrupt path - timeout in cycles, then converted to µs */
+
+				// firstly, flush all TX buffers before sleeping with interrupts !!!
+				for (i = 0; i < qconf->n_tx_port; ++i) {
+					portid = qconf->tx_port_id[i];
+					uint16_t preIntrTXflushed = rte_eth_tx_buffer_flush(portid,
+															qconf->tx_queue_id[portid],
+															qconf->tx_buffer[portid]
+														);
+				}
+
+				uint64_t timeout_cycles = tstate->avg_off_duration;
+				if (timeout_cycles > tstate->max_intr_timeout_cycles)
+					timeout_cycles = tstate->max_intr_timeout_cycles;
+
+				uint64_t timeout_us = (timeout_cycles * 1000000ULL) / tsc_hz;
 
 				turn_on_off_intr(qconf, 1);
-				int woke_with_packets = sleep_with_timeout(qconf->n_rx_queue, lcore_id, timeout_us);
 				// sleep_with_timeout returns 0 if woke with timeout, 
 				// otherwise returns the number of events that woke it up
+				int woke_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, lcore_id, timeout_us);
 				turn_on_off_intr(qconf, 0);
 
-				/* Grace period polling */
-				if (woke_with_packets == 0) {
+				if (woke_with_n_packets == 0) {
 					// awoken with timeout, execute grace polling
+					/* Grace polling */
 					for (uint32_t g = 0; g < tstate->grace_poll_count; g++) {
-						// j_rte_delay_ns_block(tstate->grace_poll_interval_us)
-						rte_delay_us(tstate->grace_poll_interval_us);
+						j_rte_delay_cycles_block(tstate->grace_poll_interval_cycles);
+
 						for (i = 0; i < qconf->n_rx_queue; ++i) {
 							rx_queue = &(qconf->rx_queue_list[i]);
 							nb_rx = rte_eth_rx_burst(rx_queue->port_id, rx_queue->queue_id,
-												pkts_burst, MAX_PKT_BURST);
+														pkts_burst, MAX_PKT_BURST);
 							if (nb_rx > 0) {
-								packets_received = true;
-								if (likely(!is_done())){
+								// packets_received = true;
+								if (likely(!is_done()))
 									goto start_rx;
-								}
 							}
 						}
 					}
 					// after grace-polling, if still no packets, 
 					// simply continue the while(!is_done() as usual, waiting for packets)
 					// this will fallthrough (packets_received is still false)
-				}
-				if (packets_received && likely(!is_done())){
+				} 
+				if (likely(!is_done())){
+					// packets_received = true;
 					goto start_rx;
 				}
 			} else {
-				/* Adaptive polling sleep */
-				rte_delay_us(tstate->suggested_sleep_us);
-				// j_rte_delay_ns_block(sleep_time_us);
+				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
 			}
 		}
 	}
