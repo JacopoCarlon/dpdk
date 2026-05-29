@@ -982,7 +982,7 @@ power_freq_scaleup_heuristic(unsigned lcore_id,
 
 
 // execute at the least 1 mm_pause, even if passed 0 ns duration
-void j_rte_delay_ns_block(unsigned int ns){
+static inline void j_rte_delay_ns_block(unsigned int ns){
 	const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1000000000ULL;
     const uint64_t start = rte_rdtsc();
     const uint64_t end = start + ticks; 
@@ -993,8 +993,8 @@ void j_rte_delay_ns_block(unsigned int ns){
 }
 
 // execute at the least 1 mm_pause, even if passed 0 us duration
-void j_rte_delay_us_block(unsigned int ns){
-	const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1000000UL;
+static inline void j_rte_delay_us_block(unsigned int us){
+	const uint64_t ticks = (uint64_t)us * rte_get_timer_hz() / 1000000UL;
     const uint64_t start = rte_rdtsc();
     const uint64_t end = start + ticks; 
 	do {
@@ -1005,11 +1005,11 @@ void j_rte_delay_us_block(unsigned int ns){
 
 
 
-
-
-
+//	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---   
+// !!! --- this is what all functions should call in hot path --- !!!
+//	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- 
 // execute at the least 1 mm_pause, even if passed 0 ticks
-void j_rte_delay_cycles_block(uint64_t ticks){
+static inline void j_rte_delay_cycles_block(uint64_t ticks){
 	const uint64_t start = rte_rdtsc();
 	const uint64_t end = start + ticks;
 	do{
