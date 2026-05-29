@@ -1364,7 +1364,6 @@ start_rx:
 
 		// TODO: idle hint is not used ever. ???
 
-
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			rx_queue->idle_hint = 0;
@@ -1441,11 +1440,10 @@ start_rx:
 			}
 			// we most likely are in off phase, let's see if we can interrupt with timeout
 			
-			uint64_t timeout_cycles = tstate->min_sleep_cycles; 
-
+			
 			// I want the too_late_to_interrupt check to override any forced interrupt, because yes.
 			// This means i need to calculate this always..
-			bool enough_time_to_intr = false;
+			bool too_late_for_intr = true;
 			
 			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---  
 			// using the "old" cur_tsc value acquired at the beginning of the while, 
@@ -1454,18 +1452,26 @@ start_rx:
 			// this is a safe approach which i agree with.
 			//const uint64_t now = rte_rdtsc();
 			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- 
-
+			
+			uint64_t remaining_off_tsc = 0; 
 			uint64_t elapsed_off_tsc = cur_tsc - tstate->phase_start_tsc;
 			if (tstate->avg_off_duration_cycles > elapsed_off_tsc) {
-				uint64_t remaining_off_tsc = tstate->avg_off_duration_cycles - elapsed_off_tsc;
+				remaining_off_tsc = tstate->avg_off_duration_cycles - elapsed_off_tsc;
 				if (remaining_off_tsc > tstate->worst_wake_up_cycles) {
-					enough_time_to_intr = true;
-					timeout_cycles = remaining_off_tsc;
+					too_late_for_intr = false;
 				}
 			}
 			
-			// // // if(enough_time_to_intr && (force_interrupt || pattern_suggests_off) && intr_en)
-			if (likely(enough_time_to_intr)) {
+			if (unlikely(too_late_for_intr)){
+				// there are mo packets, but there is not enough time to interrupt
+				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
+			} else {
+				// // // if(!too_late_for_intr && (force_interrupt || pattern_suggests_off) && intr_en)
+				/* 
+				* --- --- --- --- --- --- --- --- --- --- --- ---
+				* --- --- --- Interrupt with Timeout  --- --- ---
+				* --- --- --- --- --- --- --- --- --- --- --- ---
+				*/
 
 				// firstly, flush all TX buffers before sleeping with interrupts !!!
 				for (i = 0; i < qconf->n_tx_port; ++i) {
@@ -1477,25 +1483,35 @@ start_rx:
 				}
 
 				// Clamp remaining-time <timeout> into allowed range
-				if (timeout_cycles > tstate->max_intr_timeout_cycles) {
-					timeout_cycles = tstate->max_intr_timeout_cycles;
-				} else if (timeout_cycles < tstate->min_sleep_cycles) {
-					timeout_cycles = tstate->min_sleep_cycles;   
+				if (remaining_off_tsc > tstate->max_intr_timeout_cycles) {
+					remaining_off_tsc = tstate->max_intr_timeout_cycles;
+				} else if (remaining_off_tsc < tstate->min_sleep_cycles) {
+					remaining_off_tsc = tstate->min_sleep_cycles;   
 				}
 
-				// // uint64_t timeout_us = (timeout_cycles * 1000000ULL) / tsc_hz;
+				// // uint64_t timeout_us = (remaining_off_tsc * 1000000ULL) / tsc_hz;
 				// // uint64_t timeout_ms = ((timeout_us + 999) / 1000);
-				uint64_t timeout_ms = (timeout_cycles + tsc_per_ms - 1) / tsc_per_ms;
+				uint64_t timeout_ms = (remaining_off_tsc + tsc_per_ms - 1) / tsc_per_ms;
 
 				turn_on_off_intr(qconf, 1);
 				// sleep_with_timeout returns 0 if woke with timeout, 
 				// otherwise returns the number of events that woke it up
-				int woke_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, timeout_ms);
+				int awoken_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, timeout_ms);
 				turn_on_off_intr(qconf, 0);
 
-				if (woke_with_n_packets == 0) {
+				if (awoken_with_n_packets){
+					if (likely(!is_done())){
+						// packets_received = true;
+						goto start_rx;
+					} 
+					// else will fall through and hit the <while (!is_done())> and then return
+				} else {
 					// awoken with timeout, execute grace polling
-					/* Grace polling */
+					/* 
+					 * --- --- --- --- --- --- --- --- --- --- 
+					 * --- --- ---  Grace polling  --- --- ---   
+				     * --- --- --- --- --- --- --- --- --- --- 
+					*/
 					for (uint32_t g = 0; g < tstate->grace_poll_count; g++) {
 						j_rte_delay_cycles_block(tstate->grace_poll_interval_cycles);
 
@@ -1510,17 +1526,13 @@ start_rx:
 							}
 						}
 					}
-					// after grace-polling, if still no packets, 
-					// simply continue the while(!is_done() as usual, waiting for packets)
-					// this will fallthrough (packets_received is still false)
 				} 
-				if (likely(!is_done())){
-					// packets_received = true;
-					goto start_rx;
-				}
-			} else {
-alt_to_intr:				
-			j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
+				// Here we arrive after grace-polling, 
+				// if there are still no packets. 
+				// will continue to the <while (!is_done())>
+			} else {	
+			// there are mo packets, but there is not enough time to interrupt
+				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
 			}
 		}
 	}
