@@ -1428,7 +1428,6 @@ start_rx:
 			if (!(force_interrupt || pattern_suggests_off)){
 				goto alt_to_intr;
 			}
-
 			// we most likely are in off phase, let's see if we can interrupt with timeout
 			
 			uint64_t timeout_cycles = tstate->min_sleep_cycles; 
@@ -1437,11 +1436,13 @@ start_rx:
 			// This means i need to calculate this always..
 			bool enough_time_to_intr = false;
 			
+			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---  
 			// using the "old" cur_tsc value acquired at the beginning of the while, 
 			// .. !! which is updated recently if we didn't enter the interrupt path ..!!
 			// -> causes the estimation of remaining_off to be slightly smaller than "real" (since elapsed_off is overshooted)
 			// this is a safe approach which i agree with.
 			//const uint64_t now = rte_rdtsc();
+			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- 
 
 			uint64_t elapsed_off_tsc = cur_tsc - tstate->phase_start_tsc;
 			if (tstate->avg_off_duration_cycles > elapsed_off_tsc) {
@@ -1741,7 +1742,6 @@ main_telemetry_loop(__rte_unused void *dummy)
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
-	uint64_t ep_nep[2] = {0}, fp_nfp[2] = {0};
 	uint64_t poll_count;
 	enum busy_rate br;
 
@@ -1781,7 +1781,7 @@ main_telemetry_loop(__rte_unused void *dummy)
 	}
 
 	printf("_main_telemetry_loop: _done for, entering while \n");
-	printf("\n\n !!!- this is the pure baseline with the single mm_pause. --- !!! \n\n");
+	printf("\n\n !!!- this is the pure with the single mm_pause only if queue is empty. --- !!! \n\n");
 	
 
 	while (!is_done()) {
@@ -1802,77 +1802,44 @@ main_telemetry_loop(__rte_unused void *dummy)
 			prev_tsc = cur_tsc;
 		}
 
-		/*
-		 * Read packet from RX queues
-		 */
-
 		// printf("___ receive from rx queue\n"); // this happens !
+		
+		some_packets_this_iteration = false;
+		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			portid = rx_queue->port_id;
 			queueid = rx_queue->queue_id;
 
-			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,
-								MAX_PKT_BURST);
-			ep_nep[nb_rx == 0]++;
-			fp_nfp[nb_rx == MAX_PKT_BURST]++;
-			poll_count++;
-			if (unlikely(nb_rx == 0))
+			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,MAX_PKT_BURST);
+
+			if (nb_rx == 0){
 				continue;
+			}
+
+			some_packets_this_iteration = true;
 
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
-				rte_prefetch0(rte_pktmbuf_mtod(
-						pkts_burst[j], void *));
+				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j], void *));
 			}
 
 			/* Prefetch and forward already prefetched packets */
 			for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
-				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
-						j + PREFETCH_OFFSET], void *));
-				l3fwd_simple_forward(pkts_burst[j], portid,
-								qconf);
+				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j + PREFETCH_OFFSET], void *));
+				l3fwd_simple_forward(pkts_burst[j], portid,qconf);
 			}
 
 			/* Forward remaining prefetched packets */
 			for (; j < nb_rx; j++) {
-				l3fwd_simple_forward(pkts_burst[j], portid,
-								qconf);
+				l3fwd_simple_forward(pkts_burst[j], portid,qconf);
 			}
 		}
-		
-		
-		// !! - execute a single <rte_pause == _mm_pause > inside the busy loop . 
-		rte_pause();		
 
-		// disable telemetry in busy polling for performance obv
-		// // //	if (unlikely(poll_count >= DEFAULT_COUNT)) {
-		// // //		diff_tsc = cur_tsc - prev_tel_tsc;
-		// // //		if (diff_tsc >= MAX_CYCLES) {
-		// // //			br = FULL;
-		// // //		} else if (diff_tsc > MIN_CYCLES &&
-		// // //				diff_tsc < MAX_CYCLES) {
-		// // //			br = (diff_tsc * 100) / MAX_CYCLES;
-		// // //		} else {
-		// // //			br = ZERO;
-		// // //		}
-		// // //		poll_count = 0;
-		// // //		prev_tel_tsc = cur_tsc;
-		// // //		/* update stats for telemetry */
-		// // //		rte_spinlock_lock(&stats[lcore_id].telemetry_lock);
-		// // //		stats[lcore_id].ep_nep[0] = ep_nep[0];
-		// // //		stats[lcore_id].ep_nep[1] = ep_nep[1];
-		// // //		stats[lcore_id].fp_nfp[0] = fp_nfp[0];
-		// // //		stats[lcore_id].fp_nfp[1] = fp_nfp[1];
-		// // //		stats[lcore_id].br = br;
-		// // //		rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
-		// // //	}
-
-		// --- --- test relaxing busypolling --- --- 
-		// rte_delay_us(1);
-		// j_rte_delay_ns_block(30);
-
-		// printf("___ cycling in while!\n"); // this happens ! 
+		// run by: pmdPause, pure
+		if (!some_packets_this_iteration){
+			rte_pause();		
+		}
 	}
 
 	return 0;
@@ -1891,18 +1858,15 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 	unsigned int lcore_id;
 	uint64_t prev_tsc, diff_tsc, cur_tsc, prev_tel_tsc;
 	int i, j, nb_rx;
-	int tot_nb_rx = 0;
+	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
-	uint64_t ep_nep[2] = {0}, fp_nfp[2] = {0};
-	uint64_t poll_count;
 	enum busy_rate br;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
 
-	poll_count = 0;
 	prev_tsc = 0;
 	prev_tel_tsc = 0;
 
@@ -1937,6 +1901,7 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 	}
 
 	printf("main_telemetry_baselinepause_loop: _done for, entering while \n");
+	printf("\n\n !!!- this is the pure with the single mm_pause only if queue is empty. --- !!! \n\n");
 	
 
 	while (!is_done()) {
@@ -1956,81 +1921,48 @@ main_telemetry_baselinepause_loop(__rte_unused void *dummy)
 			}
 			prev_tsc = cur_tsc;
 		}
-
-		/*
-		 * Read packet from RX queues
-		 */
-
+		
 		// printf("___ receive from rx queue\n"); // this happens !
-		tot_nb_rx = 0;
+
+		some_packets_this_iteration = false;
+		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			portid = rx_queue->port_id;
 			queueid = rx_queue->queue_id;
 
-			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,
-								MAX_PKT_BURST);
-			ep_nep[nb_rx == 0]++;
-			fp_nfp[nb_rx == MAX_PKT_BURST]++;
-			poll_count++;
-			if (unlikely(nb_rx == 0))
-				continue;
+			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,MAX_PKT_BURST);
 
-			tot_nb_rx += nb_rx;
+			if (nb_rx == 0){
+				continue;
+			}
+
+			some_packets_this_iteration = true;
 
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
-				rte_prefetch0(rte_pktmbuf_mtod(
-						pkts_burst[j], void *));
+				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j], void *));
 			}
 
 			/* Prefetch and forward already prefetched packets */
 			for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
-				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
-						j + PREFETCH_OFFSET], void *));
-				l3fwd_simple_forward(pkts_burst[j], portid,
-								qconf);
+				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j + PREFETCH_OFFSET], void *));
+				l3fwd_simple_forward(pkts_burst[j], portid,qconf);
 			}
 
 			/* Forward remaining prefetched packets */
 			for (; j < nb_rx; j++) {
-				l3fwd_simple_forward(pkts_burst[j], portid,
-								qconf);
+				l3fwd_simple_forward(pkts_burst[j], portid,qconf);
 			}
 		}
 
-		rte_pause();		
-		//	if (unlikely(tot_nb_rx == 0)) {
-		//		// if we received no packets from any queue, then we execute the pause.
-		//		// --- --- test relaxing busypolling --- --- 
-		//		// rte_delay_us(1);
-		//		j_rte_delay_ns_block(busypolling_pause_duration_ns);
-		//	}
-
-		// no need for telemetry data.
-		// // if (unlikely(poll_count >= DEFAULT_COUNT)) {
-		// // 	diff_tsc = cur_tsc - prev_tel_tsc;
-		// // 	if (diff_tsc >= MAX_CYCLES) {
-		// // 		br = FULL;
-		// // 	} else if (diff_tsc > MIN_CYCLES &&
-		// // 			diff_tsc < MAX_CYCLES) {
-		// // 		br = (diff_tsc * 100) / MAX_CYCLES;
-		// // 	} else {
-		// // 		br = ZERO;
-		// // 	}
-		// // 	poll_count = 0;
-		// // 	prev_tel_tsc = cur_tsc;
-		// // 	/* update stats for telemetry */
-		// // 	rte_spinlock_lock(&stats[lcore_id].telemetry_lock);
-		// // 	stats[lcore_id].ep_nep[0] = ep_nep[0];
-		// // 	stats[lcore_id].ep_nep[1] = ep_nep[1];
-		// // 	stats[lcore_id].fp_nfp[0] = fp_nfp[0];
-		// // 	stats[lcore_id].fp_nfp[1] = fp_nfp[1];
-		// // 	stats[lcore_id].br = br;
-		// // 	rte_spinlock_unlock(&stats[lcore_id].telemetry_lock);
-		// // }
-
-		// printf("___ cycling in while!\n"); // this happens ! 
+		// run by: busypollingWithPAUSE
+		if (!some_packets_this_iteration){
+			// if we received no packets from any queue, then we execute the pause.
+			// --- --- test relaxing busypolling --- --- 
+			// rte_delay_us(1);
+			j_rte_delay_ns_block(busypolling_pause_duration_ns);
+		}
 	}
 
 	return 0;
