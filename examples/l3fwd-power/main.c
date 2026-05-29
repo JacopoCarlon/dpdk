@@ -973,10 +973,31 @@ power_freq_scaleup_heuristic(unsigned lcore_id,
 
 
 
+// get current clock tick number : 
+// rte_get_timer_cycles()-> rte_get_tsc_cycles() -> rte_rdtsc()
+// so we should always just call rte_rdtsc() . 
+
+
+
+
+
+// execute at the least 1 mm_pause, even if passed 0 ns duration
 void j_rte_delay_ns_block(unsigned int ns){
+	const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1000000000ULL;
     const uint64_t start = rte_rdtsc();
-    const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1E9;
-    do {
+    const uint64_t end = start + ticks; 
+	do {
+		rte_pause();
+	} 
+	while ((rte_rdtsc() - start) < ticks);
+}
+
+// execute at the least 1 mm_pause, even if passed 0 us duration
+void j_rte_delay_us_block(unsigned int ns){
+	const uint64_t ticks = (uint64_t)ns * rte_get_timer_hz() / 1000000UL;
+    const uint64_t start = rte_rdtsc();
+    const uint64_t end = start + ticks; 
+	do {
 		rte_pause();
 	} 
 	while ((rte_rdtsc() - start) < ticks);
@@ -985,19 +1006,32 @@ void j_rte_delay_ns_block(unsigned int ns){
 
 
 
+
+
+// execute at the least 1 mm_pause, even if passed 0 ticks
 void j_rte_delay_cycles_block(uint64_t ticks){
 	const uint64_t start = rte_rdtsc();
+	const uint64_t end = start + ticks;
 	do{
 		rte_pause();
-	} while ((rte_rdtsc() - start) < ticks);
+	} while (rte_rdtsc() < end);
 }
 
 
 
-static inline uint64_t us_to_cycles(uint64_t us, uint64_t tsc_hz)
-{
+// can return 0
+static inline uint64_t us_to_cycles(uint64_t us, uint64_t tsc_hz){
     return (us * tsc_hz) / 1000000ULL;
 }
+
+
+
+// can return 0
+static inline uint64_t ns_to_cycles(uint64_t us, uint64_t tsc_hz){
+    return (us * tsc_hz) / 1000000000ULL;
+}
+
+
 
 
 // --------------------------------------------------------------------
@@ -2037,6 +2071,8 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 	printf("\n\n !!! --- Execute pauses of ns() duration only if all queues are empty --- !!! \n\n");
 	
 
+	uint64_t busypolling_pause_duration_ns_in_cycles = ns_to_cycles(busypolling_pause_duration_ns);
+
 	while (!is_done()) {
 
 		// printf("___ drain tx queue\n"); // this happens !
@@ -2096,7 +2132,8 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 			// if we received no packets from any queue, then we execute the pause.
 			// --- --- test relaxing busypolling --- --- 
 			// rte_delay_us(1);
-			j_rte_delay_ns_block(busypolling_pause_duration_ns);
+			// j_rte_delay_ns_block(busypolling_pause_duration_ns);
+			j_rte_delay_cycles_block(busypolling_pause_duration_ns_in_cycles);
 		}
 	}
 
@@ -2568,7 +2605,7 @@ print_pmd_mode_table(void)
 	printf("| (without ns pause)         |                                          |                                                       |\n");
 	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
 	printf("| --pmd-mgmt baseline        | main_baselineWithNanoSecondPause_loop    | j_rte_delay_ns_block(busypolling_pause_duration_ns)   |\n");
-	printf("| + --busypolling_pause_*    |                                          | when all queues empty                                 |\n");
+	printf("| + --busypolling_pause_*    |                                          | when all queues empty, via j_rte_delay_cycles_block   |\n");
 	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
 	printf("| --pmd-mgmt pause           | main_pause_loop                          | no explicit delay in loop;                            |\n");
 	printf("|                            |                                          | relies on clb_pause() callback (rte_pause)            |\n");
