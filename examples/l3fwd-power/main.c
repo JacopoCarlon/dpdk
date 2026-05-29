@@ -81,7 +81,7 @@ struct traffic_state {
 
     uint64_t tsc_hz;	// hardware invariant, set once
 
-    /* --- Pre‑computed thresholds in cycles --- */
+    /* --- Pre-computed thresholds in cycles --- */
     uint64_t max_intr_timeout_cycles;		// cycles
     uint64_t grace_poll_interval_cycles;	// cycles
     uint64_t worst_wake_up_cycles;			// cycles
@@ -1154,7 +1154,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
         }
         tstate->last_packet_tsc = current_tsc;
         tstate->consecutive_empty = 0;
-        tstate->suggested_sleep_cycles =  tstate->default_min_sleep_duration_cycles; // ~1 µs
+        tstate->suggested_sleep_cycles =  tstate->default_min_sleep_duration_cycles; // ~1 us
     } else {
 		const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
         if (tstate->in_on_phase && (time_since_last > tstate->avg_off_duration_cycles)) {
@@ -1167,11 +1167,11 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
 
         // Calculate adaptive sleep hint in cycles
         if (tstate->in_on_phase) {
-            tstate->suggested_sleep_cycles = tstate->default_min_sleep_duration_cycles; // ~1 µs
+            tstate->suggested_sleep_cycles = tstate->default_min_sleep_duration_cycles; // ~1 us
         } else {
             // half of expected remaining off time
             uint64_t half_off = tstate->avg_off_duration_cycles >> 1;
-            // clamp to pre‑computed min/max cycles
+            // clamp to pre-computed min/max cycles
             if (half_off > tstate->max_sleep_cycles)
                 half_off = tstate->max_sleep_cycles;
             if (half_off < tstate->min_sleep_cycles)
@@ -1300,7 +1300,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	tstate->phase_start_tsc = rte_get_tsc_cycles();
 	tstate->last_packet_tsc = tstate->phase_start_tsc;
 
-	// Initial averages: 100 µs in cycles (integer, no float)
+	// Initial averages: 100 us in cycles (integer, no float)
 	tstate->avg_on_duration_cycles  					= us_to_cycles(100ULL ,					tsc_hz);
 	tstate->avg_off_duration_cycles 					= us_to_cycles(100ULL ,					tsc_hz);
 	tstate->max_intr_timeout_cycles    			= us_to_cycles(max_interrupt_timeout_us ,		tsc_hz);
@@ -1315,7 +1315,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	tstate->min_cons_empty_for_intr    = min_cons_empty_for_intr;
 
 	// Suggested sleep hint (will be overwritten quickly)
-	tstate->suggested_sleep_cycles = tsc_hz / 1000000ULL; // 1 µs equivalent
+	tstate->suggested_sleep_cycles = tsc_hz / 1000000ULL; // 1 us equivalent
 	
 	printf("\n\n hybrid mode is starting, using parameters : \n");
 	printf("tstate->phase_start_tsc : %lu\n", 			tstate->phase_start_tsc);
@@ -1739,6 +1739,7 @@ main_baselinePure_loop(__rte_unused void *dummy)
 	unsigned int lcore_id;
 	uint64_t prev_tsc, diff_tsc, cur_tsc, prev_tel_tsc;
 	int i, j, nb_rx;
+	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
@@ -1755,12 +1756,17 @@ main_baselinePure_loop(__rte_unused void *dummy)
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
 
-	printf("_main_baselinePure_loop: entered\n");
+	printf("main_baselinePure_loop: entered\n");
 
-	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n", pmgmt_type);
+	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n\n", pmgmt_type);
+
 	if (baseline_enabled){
-		printf("_main_baselinePure_loop running baseline\n");
+		printf("main_baselinePure_loop with baseline_enabled\n");
 	}
+	if (baseline_pause_enabled){
+		printf("main_baselinePure_loop with baseline_pause_enabled\n");
+	}
+
 
 
 	if (qconf->n_rx_queue == 0) {
@@ -1770,7 +1776,7 @@ main_baselinePure_loop(__rte_unused void *dummy)
 		return 0;
 	}
 
-	RTE_LOG(INFO, L3FWD_POWER, "entering main telemetry loop on lcore %u\n",
+	RTE_LOG(INFO, L3FWD_POWER, "entering main_baselinePure_loop on lcore %u\n",
 		lcore_id);
 
 	for (i = 0; i < qconf->n_rx_queue; i++) {
@@ -1781,7 +1787,7 @@ main_baselinePure_loop(__rte_unused void *dummy)
 	}
 
 	printf("_main_baselinePure_loop: _done for, entering while \n");
-	printf("\n\n !!!- this is the pure with the single mm_pause only if queue is empty. --- !!! \n\n");
+	printf("\n\n !!!- this is the pure with the single mm_pause only if all queues are empty. --- !!! \n\n");
 	
 
 	while (!is_done()) {
@@ -1857,6 +1863,7 @@ main_pause_loop(__rte_unused void *dummy)
 	unsigned int lcore_id;
 	uint64_t prev_tsc, diff_tsc, cur_tsc, prev_tel_tsc;
 	int i, j, nb_rx;
+	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
@@ -1875,9 +1882,13 @@ main_pause_loop(__rte_unused void *dummy)
 
 	printf("main_pause_loop: entered\n");
 
-	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n", pmgmt_type);
+	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n\n", pmgmt_type);
+
 	if (baseline_enabled){
-		printf("main_pause_loop running baseline\n");
+		printf("main_pause_loop with baseline_enabled\n");
+	}
+	if (baseline_pause_enabled){
+		printf("main_pause_loop with baseline_pause_enabled\n");
 	}
 
 
@@ -1888,7 +1899,7 @@ main_pause_loop(__rte_unused void *dummy)
 		return 0;
 	}
 
-	RTE_LOG(INFO, L3FWD_POWER, "entering main telemetry loop on lcore %u\n",
+	RTE_LOG(INFO, L3FWD_POWER, "entering main_pause_loop loop on lcore %u\n",
 		lcore_id);
 
 	for (i = 0; i < qconf->n_rx_queue; i++) {
@@ -1899,7 +1910,7 @@ main_pause_loop(__rte_unused void *dummy)
 	}
 
 	printf("main_pause_loop: _done for, entering while \n");
-	printf("\n\n !!!- this is the pure with the single mm_pause only if queue is empty. --- !!! \n\n");
+	printf("\n\n !!! --- execute clb_pause() for each queue that returned empty --- !!! \n\n");
 	
 
 	while (!is_done()) {
@@ -1995,9 +2006,13 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 	printf("---> targetting baseline with pause of duration %u ns !!!\n\n", busypolling_pause_duration_ns);
 	printf("executing pause only if all queues returned empty.\n");
 
-	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n", pmgmt_type);
+	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n\n", pmgmt_type);
+
 	if (baseline_enabled){
-		printf("main_baselineWithNanoSecondPause_loop running baseline\n");
+		printf("main_baselineWithNanoSecondPause_loop with baseline_enabled\n");
+	}
+	if (baseline_pause_enabled){
+		printf("main_baselineWithNanoSecondPause_loop with baseline_pause_enabled\n");
 	}
 
 
@@ -2008,7 +2023,7 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 		return 0;
 	}
 
-	RTE_LOG(INFO, L3FWD_POWER, "entering main main_baselineWithNanoSecondPause_loop loop on lcore %u\n",
+	RTE_LOG(INFO, L3FWD_POWER, "entering main_baselineWithNanoSecondPause_loop on lcore %u\n",
 		lcore_id);
 
 	for (i = 0; i < qconf->n_rx_queue; i++) {
@@ -2019,7 +2034,7 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 	}
 
 	printf("main_baselineWithNanoSecondPause_loop: _done for, entering while \n");
-	printf("\n\n !!!- this is the pure with the single mm_pause only if queue is empty. --- !!! \n\n");
+	printf("\n\n !!! --- Execute pauses of ns() duration only if all queues are empty --- !!! \n\n");
 	
 
 	while (!is_done()) {
@@ -2118,6 +2133,18 @@ main_telemetry_loop(__rte_unused void *dummy)
 
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
+
+
+	printf("pmgmt_type selected is %d. (remember that 0==baseline; 1==monitor; 2==pause; 3==scale)\n\n", pmgmt_type);
+
+	if (baseline_enabled){
+		printf("main_telemetry_loop with baseline_enabled\n");
+	}
+	if (baseline_pause_enabled){
+		printf("main_telemetry_loop with baseline_pause_enabled\n");
+	}
+
+
 
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, L3FWD_POWER, "lcore %u has nothing to do\n",
@@ -2529,6 +2556,31 @@ init_lcore_rx_queues(void)
 
 /* display usage */
 static void
+print_pmd_mode_table(void)
+{
+	printf("\n");
+	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
+	printf("| PMD mode                   | Main loop                                | Idle behavior                                         |\n");
+	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
+	printf("| --pmd-mgmt baseline        | main_baselinePure_loop                   | explicit rte_pause() when all queues empty            |\n");
+	printf("| (without ns pause)         |                                          |                                                       |\n");
+	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
+	printf("| --pmd-mgmt baseline        | main_baselineWithNanoSecondPause_loop    | j_rte_delay_ns_block(busypolling_pause_duration_ns)   |\n");
+	printf("| + --busypolling_pause_*    |                                          | when all queues empty                                 |\n");
+	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
+	printf("| --pmd-mgmt pause           | main_pause_loop                          | no explicit delay in loop;                            |\n");
+	printf("|                            |                                          | relies on clb_pause() callback (rte_pause)            |\n");
+	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
+	printf("| --pmd-mgmt monitor         | main_telemetry_loop                      | no explicit delay in loop;                            |\n");
+	printf("|                            |                                          | relies on clb_umwait() callback (umwait)              |\n");
+	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
+	printf("| --pmd-mgmt scale           | main_telemetry_loop                      | no explicit delay in loop;                            |\n");
+	printf("|                            |                                          | relies on frequency scaling callbacks                 |\n");
+	printf("+----------------------------+------------------------------------------+-------------------------------------------------------+\n");
+	printf("\n");
+}
+
+static void
 print_usage(const char *prgname)
 {
 	printf ("%s [EAL options] -- -p PORTMASK -P"
@@ -2578,6 +2630,7 @@ print_usage(const char *prgname)
 		"  --scale-freq-max FREQ_MAX: set maximum frequency for scaling mode for"
 		" all application lcores (FREQ_MAX must be in kHz, in increments of 100MHz)\n",
 		prgname);
+	print_pmd_mode_table();
 }
 
 
@@ -3758,6 +3811,28 @@ config_port_max_pkt_len(struct rte_eth_conf *conf,
 }
 
 /* Power library initialized in the main routine. 8< */
+
+
+// // 	+----------------------------+------------------------------------------+-------------------------------------------------------+
+// // 	| PMD mode                   | Main loop                        		| Idle behavior                                 		|
+// // 	+----------------------------+------------------------------------------+-------------------------------------------------------+
+// // 	| --pmd-mgmt baseline        | main_baselinePure_loop           		| explicit rte_pause() when all queues empty    		|
+// // 	| (without ns pause)         |                                  		|                                               		|
+// // 	+----------------------------+------------------------------------------+-------------------------------------------------------+
+// // 	| --pmd-mgmt baseline        | main_baselineWithNanoSecondPause_loop 	| j_rte_delay_ns_block(busypolling_pause_duration_ns) 	|
+// // 	| + --busypolling_pause_*    |                                  		| when all queues empty                          		|
+// // 	+----------------------------+------------------------------------------+-------------------------------------------------------+
+// // 	| --pmd-mgmt pause           | main_pause_loop                  		| no explicit delay in loop;                    		|
+// // 	|                            |                                  		| relies on clb_pause() callback (rte_pause)    		|
+// // 	+----------------------------+------------------------------------------+-------------------------------------------------------+
+// // 	| --pmd-mgmt monitor         | main_telemetry_loop              		| no explicit delay in loop;                    		|
+// // 	|                            |                                  		| relies on clb_umwait() callback (umwait)      		|
+// // 	+----------------------------+------------------------------------------+-------------------------------------------------------+
+// // 	| --pmd-mgmt scale           | main_telemetry_loop              		| no explicit delay in loop;                    		|
+// // 	|                            |                                  		| relies on frequency scaling callbacks         		|
+// // 	+----------------------------+------------------------------------------+-------------------------------------------------------+
+
+
 int
 main(int argc, char **argv)
 {
@@ -4268,13 +4343,17 @@ main(int argc, char **argv)
 		else if (pmgmt_type == RTE_POWER_MGMT_TYPE_PAUSE) {
 			printf("main _ chosen mode is : APP_MODE_PMD_MGMT pause, using main_pause_loop\n");
 			rte_eal_mp_remote_launch(main_pause_loop, NULL, CALL_MAIN);
-						printf("main _ chosen mode is : APP_MODE_PMD_MGMT pause !!!! main_pause_loop !!!! \n");
+			printf("main _ chosen mode is : APP_MODE_PMD_MGMT pause !!!! main_pause_loop !!!! \n");
+		}
+		else if (pmgmt_type == RTE_POWER_MGMT_TYPE_MONITOR ||
+				pmgmt_type == RTE_POWER_MGMT_TYPE_SCALE) {
+			printf("main _ chosen mode is : APP_MODE_PMD_MGMT monitor/scale, using main_telemetry_loop\n");
+			rte_eal_mp_remote_launch(main_telemetry_loop, NULL, CALL_MAIN);
 		}
 		else {
-			/* For monitor, scale, or baseline (without ns pause) */
-			printf("main _ chosen mode is : APP_MODE_PMD_MGMT (monitor/scale/baseline)\n");
+			/* baseline (without ns pause) - explicit rte_pause on empty queues */
+			printf("main _ chosen mode is : APP_MODE_PMD_MGMT baseline, using main_baselinePure_loop (rte_pause on empty)\n");
 			rte_eal_mp_remote_launch(main_baselinePure_loop, NULL, CALL_MAIN);
-						printf("main _ chosen mode is : APP_MODE_PMD_MGMT baseline, rte_pause() at the end if queues are all empty !!!! main_baselinePure_loop !!!! \n");
 		}
 	}
 
