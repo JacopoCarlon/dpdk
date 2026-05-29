@@ -26,11 +26,11 @@ static struct pmd_conf_data {
 	/** what do we support? */
 	struct rte_cpu_intrinsics intrinsics_support;
 	/** pre-calculated tsc diff for 1us */
+	// this variable is now unused since clb_pause does ns-duration pauses.
 	uint64_t tsc_per_us;
-	uint64_t tsc_per_ns;
 	/** how many rte_pause can we fit in a microsecond? */
+	// this variable is now unused since clb_pause does ns-duration pauses.
 	uint64_t pause_per_us;
-	uint64_t pause_per_ns;
 } global_data;
 
 /**
@@ -185,7 +185,6 @@ calc_tsc(void)
 	const uint64_t tsc_per_us = hz / US_PER_S; /* 1us */
 
 	global_data.tsc_per_us = tsc_per_us;
-	global_data.tsc_per_ns = tsc_per_us/1000;
 
 	/* only do this if we don't have tpause */
 	if (!global_data.intrinsics_support.power_pause) {
@@ -204,7 +203,6 @@ calc_tsc(void)
 		us_per_pause = us / n_pauses;
 
 		global_data.pause_per_us = (uint64_t)(1.0 / us_per_pause);
-		global_data.pause_per_ns = global_data.pause_per_us/1000;
 	}
 }
 
@@ -347,6 +345,9 @@ clb_umwait(uint16_t port_id, uint16_t qidx, struct rte_mbuf **pkts __rte_unused,
 
 
 
+
+
+
 static uint16_t
 clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 		struct rte_mbuf **pkts __rte_unused, uint16_t nb_rx,
@@ -374,29 +375,45 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 
 		/* sleep for 1 microsecond, use tpause if we have it */
 
-		// printf("!!! --- clb_pause : entering rte_power_pause or rte_pause, using pause_per_ns, target durationIn64 is %lu !!!\n", durationIn64);
+		// printf("!!! --- clb_pause : entering rte_power_pause or rte_pause, using new pause ns of target duration is %lu !!!\n", (uint64_t)duration);
+		
 		if (global_data.intrinsics_support.power_pause) {
 			printf("!!! --- clb_pause -> rte_power_pause - about to execute the weird assembly tpause\n") ;
-			const uint64_t cur = rte_rdtsc();
-			// const uint64_t wait_tsc = cur + global_data.tsc_per_us * duration;
-			const uint64_t wait_tsc = cur + global_data.tsc_per_ns * duration;
+			// const uint64_t cur = rte_rdtsc();
+			const uint64_t wait_tsc = rte_rdtsc(); + ((uint64_t)duration * rte_get_timer_hz()) / 1000000000ULL;
 			rte_power_pause(wait_tsc);
-		} else {
-			//  original clb_pause code :
-			//	printf("!!! ... clb_pause -> rte_pause which is _mmpause \n ");
-			// 	uint64_t i;
-			//	//	for (i = 0; i < global_data.pause_per_us * duration; i++)
-			//	//		rte_pause();
-
-			const uint64_t start = rte_get_timer_cycles();
-			const uint64_t ticks = (uint64_t)durationIn64 * rte_get_timer_hz() / 1E9;
-			while ((rte_get_timer_cycles() - start) < ticks)
-			    rte_pause();
+		} 
+		else {
+			// const uint64_t cur = rte_rdtsc();
+			// const uint64_t ticks = ((uint64_t)duration * rte_get_timer_hz()) / 1000000000ULL;
+			const uint64_t end_timer_cycles = rte_rdtsc() + ((uint64_t)duration * rte_get_timer_hz()) / 1000000000ULL;
+			do {
+				rte_pause();
+			} while (rte_rdtsc() < end_timer_cycles);
 		}
-	}
 
+		//	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- 
+		//	original clb_pause block :  
+		//	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- 
+		//	/* sleep for 1 microsecond, use tpause if we have it */
+		// 	if (global_data.intrinsics_support.power_pause) {
+		// 		const uint64_t cur = rte_rdtsc();
+		// 		const uint64_t wait_tsc =
+		// 			cur + global_data.tsc_per_us * duration;
+		// 		rte_power_pause(wait_tsc);
+		// 	} else {
+		// 		uint64_t i;
+		// 		for (i = 0; i < global_data.pause_per_us * duration; i++)
+		// 			rte_pause();
+		// 	}
+
+	}
 	return nb_rx;
 }
+
+
+
+
 
 static uint16_t
 clb_scale_freq(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
@@ -634,7 +651,7 @@ rte_power_ethdev_pmgmt_queue_enable(unsigned int lcore_id, uint16_t port_id,
 		}
 		break;
 	case RTE_POWER_MGMT_TYPE_PAUSE:
-		printf("!!! RTE_POWER_MGMT_TYPE_SCALE checking --- \n");
+		printf("!!! RTE_POWER_MGMT_TYPE_PAUSE checking --- \n");
 		/* figure out various time-to-tsc conversions */
 		if (global_data.tsc_per_us == 0){
 			calc_tsc();
