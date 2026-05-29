@@ -1366,27 +1366,16 @@ start_rx:
 
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
-			rx_queue->idle_hint = 0;
 			portid = rx_queue->port_id;
 			queueid = rx_queue->queue_id;
 
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
 			
 			if (unlikely(nb_rx == 0)) {
-				// if no packets on this queue
-				rx_queue->zero_rx_packet_count++;
-				
-				if (rx_queue->zero_rx_packet_count <= MIN_ZERO_POLL_COUNT){
-					continue;
-				}
-				// this is the same logic as interruptOnly:
-				rx_queue->idle_hint = power_idle_heuristic(rx_queue->zero_rx_packet_count);
-				// // // lcore_rx_idle_count++;
-			} else {
-				// if packets on this queue
-				packets_received = true;
-				rx_queue->zero_rx_packet_count = 0;
-			}
+				// no packets on this queue, go to other queues
+				continue;
+			} 
+			packets_received = true;
 			
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
@@ -1408,7 +1397,7 @@ start_rx:
 		// consecutive_empty shall represent FULL_ITERATIONS_WITHOUT_ANY_PACKETS !!!
 		update_traffic_state(cur_tsc, packets_received, tstate);
 
-
+		
 		/* Hybrid sleep decision logic */
 		if (likely(packets_received)){
 			// we did receive some packets, so we must busy poll.
@@ -1530,10 +1519,7 @@ start_rx:
 				// Here we arrive after grace-polling, 
 				// if there are still no packets. 
 				// will continue to the <while (!is_done())>
-			} else {	
-			// there are mo packets, but there is not enough time to interrupt
-				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
-			}
+			} 
 		}
 	}
 	return 0;
