@@ -1249,7 +1249,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
 	bool intr_en = false;
-	uint32_t lcore_rx_idle_count = 0;
+	// // // uint32_t lcore_rx_idle_count = 0;
 	
 	printf("--- Entered main intr loop !!! \n");
 	
@@ -1301,15 +1301,15 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	tstate->last_packet_tsc = tstate->phase_start_tsc;
 
 	// Initial averages: 100 us in cycles (integer, no float)
-	tstate->avg_on_duration_cycles  					= us_to_cycles(100ULL ,					tsc_hz);
-	tstate->avg_off_duration_cycles 					= us_to_cycles(100ULL ,					tsc_hz);
-	tstate->max_intr_timeout_cycles    			= us_to_cycles(max_interrupt_timeout_us ,		tsc_hz);
-	tstate->grace_poll_interval_cycles 			= us_to_cycles(grace_poll_interval_us ,			tsc_hz);
-	tstate->worst_wake_up_cycles       			= us_to_cycles(worst_wake_up_us ,				tsc_hz);
-	tstate->no_pkt_ts_off_cycles       			= us_to_cycles(no_pkt_ts_off ,					tsc_hz);
-	tstate->min_sleep_cycles           			= us_to_cycles(min_small_sleep_us ,				tsc_hz);
-	tstate->max_sleep_cycles           			= us_to_cycles(max_small_sleep_us ,				tsc_hz);
-	tstate->default_min_sleep_duration_cycles 	= us_to_cycles(default_min_sleep_duration_us ,	tsc_hz);
+	tstate->avg_on_duration_cycles  			= us_to_cycles(100ULL,							tsc_hz);
+	tstate->avg_off_duration_cycles 			= us_to_cycles(100ULL,							tsc_hz);
+	tstate->max_intr_timeout_cycles    			= us_to_cycles(max_interrupt_timeout_us,		tsc_hz);
+	tstate->grace_poll_interval_cycles 			= us_to_cycles(grace_poll_interval_us,			tsc_hz);
+	tstate->worst_wake_up_cycles       			= us_to_cycles(worst_wake_up_us,				tsc_hz);
+	tstate->no_pkt_ts_off_cycles       			= us_to_cycles(no_pkt_ts_off,					tsc_hz);
+	tstate->min_sleep_cycles           			= us_to_cycles(min_small_sleep_us,				tsc_hz);
+	tstate->max_sleep_cycles           			= us_to_cycles(max_small_sleep_us,				tsc_hz);
+	tstate->default_min_sleep_duration_cycles 	= us_to_cycles(default_min_sleep_duration_us,	tsc_hz);
 
 	tstate->grace_poll_count           = grace_poll_count;
 	tstate->min_cons_empty_for_intr    = min_cons_empty_for_intr;
@@ -1320,8 +1320,8 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	printf("\n\n hybrid mode is starting, using parameters : \n");
 	printf("tstate->phase_start_tsc : %lu\n", 			tstate->phase_start_tsc);
 	printf("tstate->last_packet_tsc : %lu\n", 			tstate->last_packet_tsc);
-	printf("tstate->avg_on_duration_cycles : %lu\n", 			tstate->avg_on_duration_cycles);
-	printf("tstate->avg_off_duration_cycles : %lu\n", 			tstate->avg_off_duration_cycles);
+	printf("tstate->avg_on_duration_cycles : %lu\n", 	tstate->avg_on_duration_cycles);
+	printf("tstate->avg_off_duration_cycles : %lu\n", 	tstate->avg_off_duration_cycles);
 	printf("tstate->max_intr_timeout : %u\n", 			tstate->max_intr_timeout);
 	printf("tstate->grace_poll_count : %u\n", 			tstate->grace_poll_count);
 	printf("tstate->grace_poll_interval_us : %u\n", 	tstate->grace_poll_interval_us);
@@ -1336,13 +1336,13 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	bool packets_received;
 
 	while (!is_done()) {
-		stats[lcore_id].nb_iteration_looped++;
 
-		cur_tsc = rte_rdtsc();
-
+		// printf("___ drain tx queue\n"); // this happens !
+		
 		/*
-		 * TX burst queue drain
-		 */
+		* TX burst queue drain
+		*/
+		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_tx_port; ++i) {
@@ -1353,15 +1353,18 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 			}
 			prev_tsc = cur_tsc;
 		}
-		
-start_rx: 
+
+start_rx:
 		/*
 		* Read packet from RX queues
 		*/
-
-		lcore_rx_idle_count = 0;
+		// // // lcore_rx_idle_count = 0;
 		
 		packets_received = false;
+
+		// TODO: idle hint is not used ever. ???
+
+
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			rx_queue->idle_hint = 0;
@@ -1370,7 +1373,6 @@ start_rx:
 
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
 			
-			stats[lcore_id].nb_rx_processed += nb_rx;
 			if (unlikely(nb_rx == 0)) {
 				// if no packets on this queue
 				rx_queue->zero_rx_packet_count++;
@@ -1380,7 +1382,7 @@ start_rx:
 				}
 				// this is the same logic as interruptOnly:
 				rx_queue->idle_hint = power_idle_heuristic(rx_queue->zero_rx_packet_count);
-				lcore_rx_idle_count++;
+				// // // lcore_rx_idle_count++;
 			} else {
 				// if packets on this queue
 				packets_received = true;
@@ -1409,13 +1411,18 @@ start_rx:
 
 
 		/* Hybrid sleep decision logic */
-		// start hybrid only if all queues returned empty
-		if (likely(lcore_rx_idle_count < qconf->n_rx_queue)){
-			rte_pause();
+		if (likely(packets_received)){
+			// we did receive some packets, so we must busy poll.
+			continue;
 		}
 		else{
+			// start hybrid only if all queues returned empty
 			if(unlikely(!intr_en)){
-				goto alt_to_intr;
+				// interrupts not enabled, we can only act as baselinePure
+				// i.e. execute a single mm_pause and loop
+				// after this mm_pause, we want to pass through the drain just in case. (?)
+				rte_pause();
+				continue;
 			}
 			
 			// to use interupt we need to either be in off phase officially, or apparently
@@ -1426,7 +1433,11 @@ start_rx:
 							(tstate->avg_off_duration_cycles > tstate->no_pkt_ts_off_cycles);
 
 			if (!(force_interrupt || pattern_suggests_off)){
-				goto alt_to_intr;
+				// we are not in an off phase, most likely packets will return,
+				// therefore again act as baselinePure so as to not impact latency during the on phase.
+				// after this mm_pause, we want to pass through the drain just in case. (?)
+				rte_pause();
+				continue;
 			}
 			// we most likely are in off phase, let's see if we can interrupt with timeout
 			
@@ -1508,8 +1519,8 @@ start_rx:
 					goto start_rx;
 				}
 			} else {
-alt_to_intr:
-				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
+alt_to_intr:				
+			j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
 			}
 		}
 	}
@@ -1578,13 +1589,13 @@ static int main_intr_loop(__rte_unused void *dummy)
 		RTE_LOG(INFO, L3FWD_POWER, "RX interrupt won't enable.\n");
 
 	while (!is_done()) {
-		stats[lcore_id].nb_iteration_looped++;
 
-		cur_tsc = rte_rdtsc();
-
+		// printf("___ drain tx queue\n"); // this happens !
+		
 		/*
 		* TX burst queue drain
 		*/
+		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_tx_port; ++i) {
@@ -1610,7 +1621,6 @@ start_rx:
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,
 					MAX_PKT_BURST);
 
-			stats[lcore_id].nb_rx_processed += nb_rx;
 			if (unlikely(nb_rx == 0)) {
 				/**
 				 * no packet received from rx queue, try to
@@ -1693,7 +1703,6 @@ start_rx:
 						goto start_rx;
 				}
 			}
-			stats[lcore_id].sleep_time += lcore_idle_hint;
 		}
 	}
 
@@ -1737,21 +1746,17 @@ main_baselinePure_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc, prev_tel_tsc;
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	int i, j, nb_rx;
 	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
-	uint64_t poll_count;
-	enum busy_rate br;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
 
-	poll_count = 0;
 	prev_tsc = 0;
-	prev_tel_tsc = 0;
 
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
@@ -1766,7 +1771,6 @@ main_baselinePure_loop(__rte_unused void *dummy)
 	if (baseline_pause_enabled){
 		printf("main_baselinePure_loop with baseline_pause_enabled\n");
 	}
-
 
 
 	if (qconf->n_rx_queue == 0) {
@@ -1793,10 +1797,11 @@ main_baselinePure_loop(__rte_unused void *dummy)
 	while (!is_done()) {
 
 		// printf("___ drain tx queue\n"); // this happens !
-		cur_tsc = rte_rdtsc();
+		
 		/*
-		 * TX burst queue drain
-		 */
+		* TX burst queue drain
+		*/
+		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_tx_port; ++i) {
@@ -1808,8 +1813,9 @@ main_baselinePure_loop(__rte_unused void *dummy)
 			prev_tsc = cur_tsc;
 		}
 
-		// printf("___ receive from rx queue\n"); // this happens !
-		
+		/*
+		* Read packet from RX queues
+		*/
 		some_packets_this_iteration = false;
 		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
@@ -1861,21 +1867,17 @@ main_pause_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc, prev_tel_tsc;
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	int i, j, nb_rx;
 	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
-	uint64_t poll_count;
-	enum busy_rate br;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
 
-	poll_count = 0;
 	prev_tsc = 0;
-	prev_tel_tsc = 0;
 
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
@@ -1916,10 +1918,11 @@ main_pause_loop(__rte_unused void *dummy)
 	while (!is_done()) {
 
 		// printf("___ drain tx queue\n"); // this happens !
-		cur_tsc = rte_rdtsc();
+		
 		/*
-		 * TX burst queue drain
-		 */
+		* TX burst queue drain
+		*/
+		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_tx_port; ++i) {
@@ -1931,8 +1934,9 @@ main_pause_loop(__rte_unused void *dummy)
 			prev_tsc = cur_tsc;
 		}
 
-		// printf("___ receive from rx queue\n"); // this happens !
-		
+		/*
+		* Read packet from RX queues
+		*/
 		some_packets_this_iteration = false;
 		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
@@ -1985,20 +1989,18 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc, prev_tel_tsc;
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	int i, j, nb_rx;
 	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
-	enum busy_rate br;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
 
 	prev_tsc = 0;
-	prev_tel_tsc = 0;
-
+	
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
 
@@ -2040,10 +2042,11 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 	while (!is_done()) {
 
 		// printf("___ drain tx queue\n"); // this happens !
-		cur_tsc = rte_rdtsc();
+		
 		/*
-		 * TX burst queue drain
-		 */
+		* TX burst queue drain
+		*/
+		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_tx_port; ++i) {
@@ -2054,9 +2057,10 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 			}
 			prev_tsc = cur_tsc;
 		}
-		
-		// printf("___ receive from rx queue\n"); // this happens !
 
+		/*
+		* Read packet from RX queues
+		*/
 		some_packets_this_iteration = false;
 		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
