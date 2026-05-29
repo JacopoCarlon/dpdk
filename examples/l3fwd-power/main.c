@@ -73,8 +73,8 @@ struct traffic_state {
     /* --- TSC-based (always in cycles) --- */
     uint64_t phase_start_tsc;			// cycles
     uint64_t last_packet_tsc;			// cycles
-    uint64_t avg_on_duration;        	// cycles
-    uint64_t avg_off_duration;       	// cycles
+    uint64_t avg_on_duration_cycles;    // cycles
+    uint64_t avg_off_duration_cycles;   // cycles
     uint64_t suggested_sleep_cycles; 	// cycles (used by adaptive polling)
 	uint64_t default_min_sleep_duration_cycles;  // cycles
     bool in_on_phase;
@@ -1148,7 +1148,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
 		if (!tstate->in_on_phase) {
 			// Transition to ON phase
             const uint64_t off_duration = current_tsc - tstate->phase_start_tsc;
-            tstate->avg_off_duration = (tstate->avg_off_duration * 3 + off_duration) >> 2;
+            tstate->avg_off_duration_cycles = (tstate->avg_off_duration_cycles * 3 + off_duration) >> 2;
             tstate->phase_start_tsc = current_tsc;
             tstate->in_on_phase = true;
         }
@@ -1157,10 +1157,10 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
         tstate->suggested_sleep_cycles =  tstate->default_min_sleep_duration_cycles; // ~1 µs
     } else {
 		const uint64_t time_since_last = current_tsc - tstate->last_packet_tsc;
-        if (tstate->in_on_phase && (time_since_last > tstate->avg_off_duration)) {
+        if (tstate->in_on_phase && (time_since_last > tstate->avg_off_duration_cycles)) {
             // Transition to OFF phase
             const uint64_t on_duration = current_tsc - tstate->phase_start_tsc;
-            tstate->avg_on_duration = (tstate->avg_on_duration * 3 + on_duration) >> 2;
+            tstate->avg_on_duration_cycles = (tstate->avg_on_duration_cycles * 3 + on_duration) >> 2;
             tstate->phase_start_tsc = current_tsc;
             tstate->in_on_phase = false;
         }
@@ -1170,7 +1170,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
             tstate->suggested_sleep_cycles = tstate->default_min_sleep_duration_cycles; // ~1 µs
         } else {
             // half of expected remaining off time
-            uint64_t half_off = tstate->avg_off_duration >> 1;
+            uint64_t half_off = tstate->avg_off_duration_cycles >> 1;
             // clamp to pre‑computed min/max cycles
             if (half_off > tstate->max_sleep_cycles)
                 half_off = tstate->max_sleep_cycles;
@@ -1301,8 +1301,8 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	tstate->last_packet_tsc = tstate->phase_start_tsc;
 
 	// Initial averages: 100 µs in cycles (integer, no float)
-	tstate->avg_on_duration  					= us_to_cycles(100ULL ,						 	tsc_hz);
-	tstate->avg_off_duration 					= us_to_cycles(100ULL ,						 	tsc_hz);
+	tstate->avg_on_duration_cycles  					= us_to_cycles(100ULL ,					tsc_hz);
+	tstate->avg_off_duration_cycles 					= us_to_cycles(100ULL ,					tsc_hz);
 	tstate->max_intr_timeout_cycles    			= us_to_cycles(max_interrupt_timeout_us ,		tsc_hz);
 	tstate->grace_poll_interval_cycles 			= us_to_cycles(grace_poll_interval_us ,			tsc_hz);
 	tstate->worst_wake_up_cycles       			= us_to_cycles(worst_wake_up_us ,				tsc_hz);
@@ -1320,8 +1320,8 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	printf("\n\n hybrid mode is starting, using parameters : \n");
 	printf("tstate->phase_start_tsc : %lu\n", 			tstate->phase_start_tsc);
 	printf("tstate->last_packet_tsc : %lu\n", 			tstate->last_packet_tsc);
-	printf("tstate->avg_on_duration : %lu\n", 			tstate->avg_on_duration);
-	printf("tstate->avg_off_duration : %lu\n", 			tstate->avg_off_duration);
+	printf("tstate->avg_on_duration_cycles : %lu\n", 			tstate->avg_on_duration_cycles);
+	printf("tstate->avg_off_duration_cycles : %lu\n", 			tstate->avg_off_duration_cycles);
 	printf("tstate->max_intr_timeout : %u\n", 			tstate->max_intr_timeout);
 	printf("tstate->grace_poll_count : %u\n", 			tstate->grace_poll_count);
 	printf("tstate->grace_poll_interval_us : %u\n", 	tstate->grace_poll_interval_us);
@@ -1423,7 +1423,7 @@ start_rx:
 			
 			const bool pattern_suggests_off =
 							!tstate->in_on_phase &&
-							(tstate->avg_off_duration > tstate->no_pkt_ts_off_cycles);
+							(tstate->avg_off_duration_cycles > tstate->no_pkt_ts_off_cycles);
 
 			if (!(force_interrupt || pattern_suggests_off)){
 				goto alt_to_intr;
@@ -1443,12 +1443,12 @@ start_rx:
 			// this is a safe approach which i agree with.
 			//const uint64_t now = rte_rdtsc();
 
-			uint64_t elapsed_off = cur_tsc - tstate->phase_start_tsc;
-			if (tstate->avg_off_duration > elapsed_off) {
-				uint64_t remaining_off = tstate->avg_off_duration - elapsed_off;
-				if (remaining_off > tstate->worst_wake_up_cycles) {
+			uint64_t elapsed_off_tsc = cur_tsc - tstate->phase_start_tsc;
+			if (tstate->avg_off_duration_cycles > elapsed_off_tsc) {
+				uint64_t remaining_off_tsc = tstate->avg_off_duration_cycles - elapsed_off_tsc;
+				if (remaining_off_tsc > tstate->worst_wake_up_cycles) {
 					enough_time_to_intr = true;
-					timeout_cycles = remaining_off;
+					timeout_cycles = remaining_off_tsc;
 				}
 			}
 			
