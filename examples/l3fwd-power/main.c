@@ -1063,7 +1063,7 @@ sleep_until_rx_interrupt(int num, int lcore)
 	// // // 	bool wakeup;
 	// // // } status[RTE_MAX_LCORE];
 	struct rte_epoll_event event[num];
-	int n:
+	int n;
 	// // // int i;
 	// // // uint16_t port_id;
 	// // // uint16_t queue_id;
@@ -1356,14 +1356,14 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	printf("tstate->last_packet_tsc : %lu\n", 			tstate->last_packet_tsc);
 	printf("tstate->avg_on_duration_cycles : %lu\n", 	tstate->avg_on_duration_cycles);
 	printf("tstate->avg_off_duration_cycles : %lu\n", 	tstate->avg_off_duration_cycles);
-	printf("tstate->max_intr_timeout_cycles : %u\n", 	tstate->max_intr_timeout_cycles);
+	printf("tstate->max_intr_timeout_cycles : %lu\n", 	tstate->max_intr_timeout_cycles);
 	printf("tstate->grace_poll_count : %u\n", 			tstate->grace_poll_count);
 	printf("tstate->grace_poll_interval_cycles : %u\n", tstate->grace_poll_interval_cycles);
 	printf("tstate->min_cons_empty_for_intr : %u\n", 	tstate->min_cons_empty_for_intr);
 	printf("tstate->worst_wake_up_cycles : %lu\n", 		tstate->worst_wake_up_cycles);
-	printf("tstate->min_sleep_cycles : %u\n", 			tstate->min_sleep_cycles);
-	printf("tstate->max_sleep_cycles : %u\n", 			tstate->max_sleep_cycles);
-	printf("tstate->no_pkt_ts_off : %u\n", 				tstate->no_pkt_ts_off);
+	printf("tstate->min_sleep_cycles : %lu\n", 			tstate->min_sleep_cycles);
+	printf("tstate->max_sleep_cycles : %lu\n", 			tstate->max_sleep_cycles);
+	printf("tstate->no_pkt_ts_off_cycles : %u\n",		tstate->no_pkt_ts_off_cycles);
 
 	printf("congratulations hybrid, let's start working !!! -----------------\n");
 
@@ -1908,10 +1908,11 @@ main_pause_loop(__rte_unused void *dummy)
 	unsigned int lcore_id;
 	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	int i, j, nb_rx;
-	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
+
+	// // // // // bool some_packets_this_iteration = false;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
@@ -1976,7 +1977,7 @@ main_pause_loop(__rte_unused void *dummy)
 		/*
 		* Read packet from RX queues
 		*/
-		some_packets_this_iteration = false;
+		// // // // // some_packets_this_iteration = false;
 		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
@@ -1989,7 +1990,7 @@ main_pause_loop(__rte_unused void *dummy)
 				continue;
 			}
 
-			some_packets_this_iteration = true;
+			// // // // // some_packets_this_iteration = true;
 
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
@@ -2663,8 +2664,8 @@ print_usage(const char *prgname)
         "  --worst-wake-up US: worst case wake up delay in us (default: 150)\n"
         "  --max-small-sleep US: max small sleep duration in us (default: 50)\n"
         "  --min-small-sleep US: min small sleep duration in us (default: 10)\n"
-        "  --no-pkt-ts-off US: threshold for off phase detection in us (default: 500)\n",
-		"  --default-min-sleep-duration US: duration in us of default sleep for grace polling (default 1us)\n", 
+        "  --no-pkt-ts-off US: threshold for off phase detection in us (default: 500)\n"
+		"  --default-min-sleep-duration US: duration in us of default sleep for grace polling (default 1us)\n" 
 		" --pmd-mgmt MODE: enable PMD power management mode. "
 		"Currently supported modes: baseline, monitor, pause, scale\n"
 		"  --max-empty-polls MAX_EMPTY_POLLS: number of empty polls to"
