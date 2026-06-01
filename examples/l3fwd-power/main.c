@@ -1286,6 +1286,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	
 	// hybrid logic variables
 	bool intr_en = false;
+	bool packets_received = false;
 	uint64_t elapsed_off_tsc = 0;
 	uint64_t remaining_off_tsc = 0; 
 	bool too_late_for_intr = true;
@@ -1376,8 +1377,6 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	printf("tstate->no_pkt_ts_off : %u\n", 				tstate->no_pkt_ts_off);
 
 	printf("congratulations hybrid, let's start working !!! -----------------\n");
-
-	bool packets_received;
 
 	while (!is_done()) {
 		// printf("___ drain tx queue\n"); // this happens !
