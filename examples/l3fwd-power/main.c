@@ -1177,7 +1177,6 @@ static int sleep_with_timeout(int num, uint64_t timeout_ms)
 //	(since all is discrete, we either are on or off ..tertium non datur)
 static void update_traffic_state(uint64_t current_tsc, bool packet_received, struct traffic_state *tstate)
 {
-	
 	if (packet_received) {
 		if (!tstate->in_on_phase) {
 			// Transition to ON phase
@@ -1283,7 +1282,6 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
 	bool intr_en = false;
-	// // // uint32_t lcore_rx_idle_count = 0;
 	
 	printf("--- Entered main intr loop !!! \n");
 	
@@ -1370,7 +1368,6 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	bool packets_received;
 
 	while (!is_done()) {
-
 		// printf("___ drain tx queue\n"); // this happens !
 		
 		/*
@@ -1385,19 +1382,17 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 						qconf->tx_queue_id[portid],
 						qconf->tx_buffer[portid]);
 			}
-			prev_tsc = cur_tsc;
+			prev_tsc = cur_tsc;	// prev_tsc is only used to trigger the drain
 		}
 
-start_rx:
 		/*
 		* Read packet from RX queues
 		*/
-		// // // lcore_rx_idle_count = 0;
-		
 		packets_received = false;
+		// When we go through a start_rx, we come from interrupt or grace, 
+		//	and packets_received was already set to false in order to enter into them
 
-		// TODO: idle hint is not used ever. ???
-
+start_rx:
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			portid = rx_queue->port_id;
@@ -1429,6 +1424,7 @@ start_rx:
 		}
 		
 		// consecutive_empty shall represent FULL_ITERATIONS_WITHOUT_ANY_PACKETS !!!
+		cur_tsc = rte_rdtsc();
 		update_traffic_state(cur_tsc, packets_received, tstate);
 
 		
@@ -1438,11 +1434,12 @@ start_rx:
 			continue;
 		}
 		else{
+			// -> no packets were received in this iteration !!!
 			// start hybrid only if all queues returned empty
 			if(unlikely(!intr_en)){
 				// interrupts not enabled, we can only act as baselinePure
 				// i.e. execute a single mm_pause and loop
-				// after this mm_pause, we want to pass through the drain just in case. (?)
+				// after this mm_pause, we want to pass through the drain just in case.
 				rte_pause();
 				continue;
 			}
@@ -1457,7 +1454,7 @@ start_rx:
 			if (!(force_interrupt || pattern_suggests_off)){
 				// we are not in an off phase, most likely packets will return,
 				// therefore again act as baselinePure so as to not impact latency during the on phase.
-				// after this mm_pause, we want to pass through the drain just in case. (?)
+				// after this mm_pause, we want to pass through the drain just in case.
 				rte_pause();
 				continue;
 			}
@@ -1469,10 +1466,10 @@ start_rx:
 			bool too_late_for_intr = true;
 			
 			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---  
-			// using the "old" cur_tsc value acquired at the beginning of the while, 
+			// using the "old" cur_tsc value acquired before the update_traffic_state, 
 			// .. !! which is updated recently if we didn't enter the interrupt path ..!!
-			// -> causes the estimation of remaining_off to be slightly smaller than "real" (since elapsed_off is overshooted)
-			// this is a safe approach which i agree with.
+			// -> causes the estimation of remaining_off to be slightly smaller than "real" (since elapsed_off is under-estimated)
+			// -> this leads to having a shorter timeout for the interrupt, which is ok since latency is more important than power saving 1 more loop.
 			//const uint64_t now = rte_rdtsc();
 			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- 
 			
@@ -1488,6 +1485,8 @@ start_rx:
 			if (unlikely(too_late_for_intr)){
 				// there are mo packets, but there is not enough time to interrupt
 				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
+				// -> this goes now back to top of the <while (!is_done())>
+				//	continue;
 			} else {
 				// // // if(!too_late_for_intr && (force_interrupt || pattern_suggests_off) && intr_en)
 				/* 
@@ -1497,12 +1496,16 @@ start_rx:
 				*/
 
 				// firstly, flush all TX buffers before sleeping with interrupts !!!
-				for (i = 0; i < qconf->n_tx_port; ++i) {
-					portid = qconf->tx_port_id[i];
-					uint16_t preIntrTXflushed = rte_eth_tx_buffer_flush(portid,
-															qconf->tx_queue_id[portid],
-															qconf->tx_buffer[portid]
-														);
+				cur_tsc = rte_rdtsc();
+				diff_tsc = cur_tsc - prev_tsc;
+				if (unlikely(diff_tsc > drain_tsc)) {
+					for (i = 0; i < qconf->n_tx_port; ++i) {
+						portid = qconf->tx_port_id[i];
+						rte_eth_tx_buffer_flush(portid,
+								qconf->tx_queue_id[portid],
+								qconf->tx_buffer[portid]);
+					}
+					prev_tsc = cur_tsc;	// prev_tsc is only used to trigger the drain
 				}
 
 				// Clamp remaining-time <timeout> into allowed range
@@ -1523,8 +1526,8 @@ start_rx:
 				turn_on_off_intr(qconf, 0);
 
 				if (awoken_with_n_packets){
+					// packets_received = true;
 					if (likely(!is_done())){
-						// packets_received = true;
 						goto start_rx;
 					} 
 					// else will fall through and hit the <while (!is_done())> and then return
@@ -1548,6 +1551,8 @@ start_rx:
 									goto start_rx;
 							}
 						}
+						// if no packets are received during grace polling, which has happened after interrupt, 
+						// we continue execution at start of while.
 					}
 				} 
 				// Here we arrive after grace-polling, 
