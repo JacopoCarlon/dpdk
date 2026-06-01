@@ -1352,18 +1352,18 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	tstate->suggested_sleep_cycles = tsc_hz / 1000000ULL; // 1 us equivalent
 	
 	printf("\n\n hybrid mode is starting, using parameters : \n");
-	printf("tstate->phase_start_tsc : %lu\n", 			tstate->phase_start_tsc);
-	printf("tstate->last_packet_tsc : %lu\n", 			tstate->last_packet_tsc);
-	printf("tstate->avg_on_duration_cycles : %lu\n", 	tstate->avg_on_duration_cycles);
-	printf("tstate->avg_off_duration_cycles : %lu\n", 	tstate->avg_off_duration_cycles);
-	printf("tstate->max_intr_timeout_cycles : %lu\n", 	tstate->max_intr_timeout_cycles);
-	printf("tstate->grace_poll_count : %u\n", 			tstate->grace_poll_count);
-	printf("tstate->grace_poll_interval_cycles : %u\n", tstate->grace_poll_interval_cycles);
-	printf("tstate->min_cons_empty_for_intr : %u\n", 	tstate->min_cons_empty_for_intr);
-	printf("tstate->worst_wake_up_cycles : %lu\n", 		tstate->worst_wake_up_cycles);
-	printf("tstate->min_sleep_cycles : %lu\n", 			tstate->min_sleep_cycles);
-	printf("tstate->max_sleep_cycles : %lu\n", 			tstate->max_sleep_cycles);
-	printf("tstate->no_pkt_ts_off_cycles : %u\n",		tstate->no_pkt_ts_off_cycles);
+	printf("tstate->phase_start_tsc : %lu\n", 				tstate->phase_start_tsc);
+	printf("tstate->last_packet_tsc : %lu\n", 				tstate->last_packet_tsc);
+	printf("tstate->avg_on_duration_cycles : %lu\n", 		tstate->avg_on_duration_cycles);
+	printf("tstate->avg_off_duration_cycles : %lu\n", 		tstate->avg_off_duration_cycles);
+	printf("tstate->max_intr_timeout_cycles : %lu\n", 		tstate->max_intr_timeout_cycles);
+	printf("tstate->grace_poll_count : %u\n", 				tstate->grace_poll_count);
+	printf("tstate->grace_poll_interval_cycles : %lu\n", 	tstate->grace_poll_interval_cycles);
+	printf("tstate->min_cons_empty_for_intr : %u\n", 		tstate->min_cons_empty_for_intr);
+	printf("tstate->worst_wake_up_cycles : %lu\n", 			tstate->worst_wake_up_cycles);
+	printf("tstate->min_sleep_cycles : %lu\n", 				tstate->min_sleep_cycles);
+	printf("tstate->max_sleep_cycles : %lu\n", 				tstate->max_sleep_cycles);
+	printf("tstate->no_pkt_ts_off_cycles : %lu\n",			tstate->no_pkt_ts_off_cycles);
 
 	printf("congratulations hybrid, let's start working !!! -----------------\n");
 
