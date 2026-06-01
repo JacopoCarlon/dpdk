@@ -989,7 +989,7 @@ static inline void j_rte_delay_ns_block(unsigned int ns){
 	do {
 		rte_pause();
 	} 
-	while ((rte_rdtsc() - start) < ticks);
+	while (rte_rdtsc() < end);
 }
 
 // execute at the least 1 mm_pause, even if passed 0 us duration
@@ -1000,7 +1000,7 @@ static inline void j_rte_delay_us_block(unsigned int us){
 	do {
 		rte_pause();
 	} 
-	while ((rte_rdtsc() - start) < ticks);
+	while (rte_rdtsc() < end);
 }
 
 
@@ -1059,14 +1059,15 @@ sleep_until_rx_interrupt(int num, int lcore)
 	 * back to sleep again without log spamming. Avoid cache line sharing
 	 * to prevent threads stepping on each others' toes.
 	 */
-	static alignas(RTE_CACHE_LINE_SIZE) struct {
-		bool wakeup;
-	} status[RTE_MAX_LCORE];
+	// // // static alignas(RTE_CACHE_LINE_SIZE) struct {
+	// // // 	bool wakeup;
+	// // // } status[RTE_MAX_LCORE];
 	struct rte_epoll_event event[num];
-	int n, i;
-	uint16_t port_id;
-	uint16_t queue_id;
-	void *data;
+	int n:
+	// // // int i;
+	// // // uint16_t port_id;
+	// // // uint16_t queue_id;
+	// // // void *data;
 
 	/*
 	if (status[lcore].wakeup) {
@@ -1088,7 +1089,7 @@ sleep_until_rx_interrupt(int num, int lcore)
 	// // // 			" port %d queue %d\n",
 	// // // 			rte_lcore_id(), port_id, queue_id);
 	// // // 	}
-	status[lcore].wakeup = n != 0;
+	// // // status[lcore].wakeup = n != 0;
 
 	return 0;
 }
@@ -1153,19 +1154,7 @@ static int sleep_with_timeout(int num, uint64_t timeout_ms)
 	int n = 0;
     n = rte_epoll_wait(RTE_EPOLL_PER_THREAD, events, num, timeout_ms);
 
-    // // // 	uint16_t port_id, queue_id;
-    // // // 	void *data;
-    // // // 	for (int i = 0; i < n; i++) {
-    // // // 	    data = events[i].epdata.data;
-    // // // 	    port_id = ((uintptr_t)data) >> (sizeof(uint16_t) * CHAR_BIT);
-    // // // 	    queue_id = ((uintptr_t)data) &
-    // // // 	              RTE_LEN2MASK((sizeof(uint16_t) * CHAR_BIT), uint16_t);
-    // // // 	    
-    // // // 	    RTE_LOG(INFO, L3FWD_POWER, "Woke up from interrupt on port %d queue %d\n",
-    // // // 	            port_id, queue_id);
-    // // // 	}
-
-    return n;
+	return n;
 }
 
 
@@ -1367,13 +1356,13 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	printf("tstate->last_packet_tsc : %lu\n", 			tstate->last_packet_tsc);
 	printf("tstate->avg_on_duration_cycles : %lu\n", 	tstate->avg_on_duration_cycles);
 	printf("tstate->avg_off_duration_cycles : %lu\n", 	tstate->avg_off_duration_cycles);
-	printf("tstate->max_intr_timeout : %u\n", 			tstate->max_intr_timeout);
+	printf("tstate->max_intr_timeout_cycles : %u\n", 	tstate->max_intr_timeout_cycles);
 	printf("tstate->grace_poll_count : %u\n", 			tstate->grace_poll_count);
-	printf("tstate->grace_poll_interval_us : %u\n", 	tstate->grace_poll_interval_us);
+	printf("tstate->grace_poll_interval_cycles : %u\n", tstate->grace_poll_interval_cycles);
 	printf("tstate->min_cons_empty_for_intr : %u\n", 	tstate->min_cons_empty_for_intr);
-	printf("tstate->worst_wake_up_us : %lu\n", 			tstate->worst_wake_up_us);
-	printf("tstate->max_small_sleep_us : %u\n", 		tstate->max_small_sleep_us);
-	printf("tstate->min_small_sleep_us : %u\n", 		tstate->min_small_sleep_us);
+	printf("tstate->worst_wake_up_cycles : %lu\n", 		tstate->worst_wake_up_cycles);
+	printf("tstate->min_sleep_cycles : %u\n", 			tstate->min_sleep_cycles);
+	printf("tstate->max_sleep_cycles : %u\n", 			tstate->max_sleep_cycles);
 	printf("tstate->no_pkt_ts_off : %u\n", 				tstate->no_pkt_ts_off);
 
 	printf("congratulations hybrid, let's start working !!! -----------------\n");
@@ -2046,7 +2035,9 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
 
-	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
+	const uint64_t tsc_hz = rte_get_tsc_hz();
+
+	const uint64_t drain_tsc = (tsc_hz + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
 
 	prev_tsc = 0;
@@ -2089,7 +2080,7 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 	printf("\n\n !!! --- Execute pauses of ns() duration only if all queues are empty --- !!! \n\n");
 	
 
-	uint64_t busypolling_pause_duration_ns_in_cycles = ns_to_cycles(busypolling_pause_duration_ns);
+	uint64_t busypolling_pause_duration_ns_in_cycles = ns_to_cycles(busypolling_pause_duration_ns, tsc_hz);
 
 	while (!is_done()) {
 
