@@ -357,8 +357,7 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 	struct pmd_core_cfg *lcore_conf;
 	const bool empty = nb_rx == 0;
 	const uint32_t duration = rte_power_pmd_mgmt_get_pause_duration();
-	const uint64_t durationIn64 = (uint64_t)duration;
-
+	
 	lcore_conf = RTE_LCORE_VAR(lcore_cfgs);
 
 	if (likely(!empty))
