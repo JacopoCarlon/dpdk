@@ -1276,13 +1276,25 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc;
-	int i, j, nb_rx;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
-	bool intr_en = false;
 	
+	// receive variables
+	uint_fast64_t i, j, nb_rx;
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
+	
+	// hybrid logic variables
+	bool intr_en = false;
+	uint64_t elapsed_off_tsc = 0;
+	uint64_t remaining_off_tsc = 0; 
+	bool too_late_for_intr = true;
+	uint64_t timeout_ms = 0;
+	int awoken_with_n_packets = 0;
+	uint_fast64_t g;
+
+
+
 	printf("--- Entered main intr loop !!! \n");
 	
     const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
@@ -1462,8 +1474,8 @@ start_rx:
 			
 			
 			// I want the too_late_to_interrupt check to override any forced interrupt, because yes.
-			// This means i need to calculate this always..
-			bool too_late_for_intr = true;
+			// This means we need to calculate this always..
+			too_late_for_intr = true;
 			
 			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---  
 			// using the "old" cur_tsc value acquired before the update_traffic_state, 
@@ -1473,8 +1485,9 @@ start_rx:
 			//const uint64_t now = rte_rdtsc();
 			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- 
 			
-			uint64_t remaining_off_tsc = 0; 
-			uint64_t elapsed_off_tsc = cur_tsc - tstate->phase_start_tsc;
+			// tsc elapsed since start of latest off phase
+			elapsed_off_tsc = cur_tsc - tstate->phase_start_tsc;
+			
 			if (tstate->avg_off_duration_cycles > elapsed_off_tsc) {
 				remaining_off_tsc = tstate->avg_off_duration_cycles - elapsed_off_tsc;
 				if (remaining_off_tsc > tstate->worst_wake_up_cycles) {
@@ -1483,7 +1496,7 @@ start_rx:
 			}
 			
 			if (unlikely(too_late_for_intr)){
-				// there are mo packets, but there is not enough time to interrupt
+				// there are no packets, but there is not enough time to interrupt
 				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
 				// -> this goes now back to top of the <while (!is_done())>
 				//	continue;
@@ -1517,12 +1530,12 @@ start_rx:
 
 				// // uint64_t timeout_us = (remaining_off_tsc * 1000000ULL) / tsc_hz;
 				// // uint64_t timeout_ms = ((timeout_us + 999) / 1000);
-				uint64_t timeout_ms = (remaining_off_tsc + tsc_per_ms - 1) / tsc_per_ms;
+				timeout_ms = (remaining_off_tsc + tsc_per_ms - 1) / tsc_per_ms;
 
 				turn_on_off_intr(qconf, 1);
 				// sleep_with_timeout returns 0 if woke with timeout, 
 				// otherwise returns the number of events that woke it up
-				int awoken_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, timeout_ms);
+				awoken_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, timeout_ms);
 				turn_on_off_intr(qconf, 0);
 
 				if (awoken_with_n_packets){
@@ -1538,7 +1551,7 @@ start_rx:
 					 * --- --- ---  Grace polling  --- --- ---   
 				     * --- --- --- --- --- --- --- --- --- --- 
 					*/
-					for (uint32_t g = 0; g < tstate->grace_poll_count; g++) {
+					for (g = 0; g < tstate->grace_poll_count; g++) {
 						j_rte_delay_cycles_block(tstate->grace_poll_interval_cycles);
 
 						for (i = 0; i < qconf->n_rx_queue; ++i) {
@@ -1551,9 +1564,10 @@ start_rx:
 									goto start_rx;
 							}
 						}
-						// if no packets are received during grace polling, which has happened after interrupt, 
-						// we continue execution at start of while.
+						// no packets received : continue grace polling.
 					}
+					// if no packets are received during grace polling, which has happened after interrupt, 
+					// we continue execution at start of while.
 				} 
 				// Here we arrive after grace-polling, 
 				// if there are still no packets. 
