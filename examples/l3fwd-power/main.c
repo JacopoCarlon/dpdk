@@ -1405,14 +1405,15 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 			prev_tsc = cur_tsc;
 		}
 
+start_rx:
 		/*
 		* Read packet from RX queues
 		*/
-		packets_received = false;
+	
 		// When we go through a start_rx, we come from interrupt or grace, 
 		//	and packets_received was already set to false in order to enter into them
-
-start_rx:
+		packets_received = false;
+		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
 			portid = rx_queue->port_id;
@@ -1424,6 +1425,21 @@ start_rx:
 				// no packets on this queue, go to other queues
 				continue;
 			} 
+
+			// there are packets
+			if(last_tsc != 0){
+				if (unlikely(!test_started)){
+					// then this is the first packet, consider the test starts now.
+					test_started = true;
+					start_tsc = cur_tsc;
+					// the first packets and previous times does not influence cumulative.
+					last_tsc = 0;
+				}else{
+					// assert(cur_tsc > last_tsc);
+					cumulative_tsc += (cur_tsc - last_tsc);
+					last_tsc = 0;
+				}
+			}
 			packets_received = true;
 			
 			/* Prefetch first packets */
@@ -1454,6 +1470,10 @@ start_rx:
 			continue;
 		}
 		else{
+			// this is the beginning of pause logic
+			if (last_tsc == 0){
+				last_tsc = rte_rdtsc();
+			}
 			// -> no packets were received in this iteration !!!
 			// start hybrid only if all queues returned empty
 			if(unlikely(!intr_en)){
@@ -1541,6 +1561,7 @@ start_rx:
 				if (awoken_with_n_packets){
 					// packets_received = true;
 					if (likely(!is_done())){
+						cur_tsc = rte_rdtsc();
 						goto start_rx;
 					} 
 					// else will fall through and hit the <while (!is_done())> and then return
@@ -1560,8 +1581,10 @@ start_rx:
 														pkts_burst, MAX_PKT_BURST);
 							if (nb_rx > 0) {
 								// packets_received = true;
-								if (likely(!is_done()))
+								if (likely(!is_done())){
+									cur_tsc = rte_rdtsc();
 									goto start_rx;
+								}
 							}
 						}
 						// no packets received : continue grace polling.
@@ -1575,6 +1598,9 @@ start_rx:
 			} 
 		}
 	}
+
+	printf("\n\n - main_hybrid_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", test_started, total_duration, cumulative_tsc, packets_failedToFlush);
+
 	return 0;
 }
 
@@ -1791,7 +1817,7 @@ start_rx:
 	}
 
 	uint64_t total_duration = last_tsc - start_tsc;
-	printf("\n\n - main_intr_loop - total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", total_duration, cumulative_tsc, packets_failedToFlush);
+	printf("\n\n - main_intr_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", test_started, total_duration, cumulative_tsc, packets_failedToFlush);
 
 	return 0;
 }
@@ -1985,7 +2011,7 @@ main_baselinePure_loop(__rte_unused void *dummy)
 
 	// we thus consider the experiment ended the <<latest first time>> queues returned without packets, i.e. last_tsc.
 	uint64_t total_duration = last_tsc - start_tsc;
-	printf("\n\n - main_baselinePure_loop - total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", total_duration, cumulative_tsc, packets_failedToFlush);
+	printf("\n\n - main_baselinePure_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", test_started, total_duration, cumulative_tsc, packets_failedToFlush);
 
 	return 0;
 }
