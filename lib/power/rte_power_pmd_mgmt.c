@@ -356,7 +356,7 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 	struct queue_list_entry *queue_conf = arg;
 	struct pmd_core_cfg *lcore_conf;
 	const bool empty = nb_rx == 0;
-	const uint32_t duration = rte_power_pmd_mgmt_get_pause_duration();
+	const uint64_t duration = (uint64_t) rte_power_pmd_mgmt_get_pause_duration();
 	
 	lcore_conf = RTE_LCORE_VAR(lcore_cfgs);
 
@@ -379,13 +379,13 @@ clb_pause(uint16_t port_id __rte_unused, uint16_t qidx __rte_unused,
 		if (global_data.intrinsics_support.power_pause) {
 			printf("!!! --- clb_pause -> rte_power_pause - about to execute the weird assembly tpause\n") ;
 			// const uint64_t cur = rte_rdtsc();
-			const uint64_t wait_tsc = rte_rdtsc(); + ((uint64_t)duration * rte_get_timer_hz()) / 1000000000ULL;
+			const uint64_t wait_tsc = rte_rdtsc() + (duration * rte_get_timer_hz()) / 1000000000ULL;
 			rte_power_pause(wait_tsc);
 		} 
 		else {
 			// const uint64_t cur = rte_rdtsc();
 			// const uint64_t ticks = ((uint64_t)duration * rte_get_timer_hz()) / 1000000000ULL;
-			const uint64_t end_timer_cycles = rte_rdtsc() + ((uint64_t)duration * rte_get_timer_hz()) / 1000000000ULL;
+			const uint64_t end_timer_cycles = rte_rdtsc() + (duration * rte_get_timer_hz()) / 1000000000ULL;
 			do {
 				rte_pause();
 			} while (rte_rdtsc() < end_timer_cycles);
