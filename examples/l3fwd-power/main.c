@@ -1599,6 +1599,7 @@ start_rx:
 		}
 	}
 
+	uint64_t total_duration = last_tsc - start_tsc;
 	printf("\n\n - main_hybrid_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", test_started, total_duration, cumulative_tsc, packets_failedToFlush);
 
 	return 0;
