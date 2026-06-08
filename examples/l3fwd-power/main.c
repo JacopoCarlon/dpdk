@@ -1468,8 +1468,10 @@ start_rx:
 			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---  
 			// using the "old" cur_tsc value acquired before the update_traffic_state, 
 			// .. !! which is updated recently if we didn't enter the interrupt path ..!!
-			// -> causes the estimation of remaining_off to be slightly smaller than "real" (since elapsed_off is under-estimated)
-			// -> this leads to having a shorter timeout for the interrupt, which is ok since latency is more important than power saving 1 more loop.
+			// -> causes the estimation of remaining_off to be slightly smaller than "real" 
+			//			(since elapsed_off is under-estimated)
+			// -> this leads to having a shorter timeout for the interrupt, 
+			//			which is ok since latency is more important than power saving 1 more loop.
 			//const uint64_t now = rte_rdtsc();
 			// !!!	--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- 
 			
@@ -1627,10 +1629,14 @@ static int main_intr_loop(__rte_unused void *dummy)
 	else
 		RTE_LOG(INFO, L3FWD_POWER, "RX interrupt won't enable.\n");
 
-	uint64_t cumulative_tsc = 0;
+	// last_tsc:
+	// - if 0: means we have received packets in last/this iteration.
+	// - if !0: means we have not had packets since last_tsc.
 	uint64_t last_tsc = 0;
+	uint64_t cumulative_tsc = 0;
+	
 	uint64_t start_tsc = rte_rdtsc_precise();
-
+	
 	while (!is_done()) {
 
 		// printf("___ drain tx queue\n"); // this happens !
@@ -1664,7 +1670,7 @@ start_rx:
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,
 					MAX_PKT_BURST);
 
-			if (unlikely(nb_rx <= 0)) {
+			if (unlikely(nb_rx == 0)) {
 				/**
 				 * no packet received from rx queue, try to
 				 * sleep for a while forcing CPU enter deeper
@@ -1680,9 +1686,15 @@ start_rx:
 				rx_queue->idle_hint = power_idle_heuristic(rx_queue->zero_rx_packet_count);
 				lcore_rx_idle_count++;
 				// TODO: why is this continue NOT in the original ????????
-				// continue;
+				// https://github.com/DPDK/dpdk/tree/main/examples/l3fwd-power/main.c
+				continue;
 			} else {
 				rx_queue->zero_rx_packet_count = 0;
+			}
+
+			if(last_tsc != 0){
+				cumulative_tsc += (cur_tsc - last_tsc);
+				last_tsc = 0;
 			}
 
 			/* Prefetch first packets */
@@ -1708,10 +1720,14 @@ start_rx:
 			 * sleep in a conservative manner, meaning sleep as
 			 * less as possible.
 			 */
+			if (last_tsc == 0){
+				last_tsc = rte_rdtsc();
+			}
 			for (i = 1, lcore_idle_hint = qconf->rx_queue_list[0].idle_hint; i < qconf->n_rx_queue; ++i) {
 				rx_queue = &(qconf->rx_queue_list[i]);
-				if (rx_queue->idle_hint < lcore_idle_hint)
+				if (rx_queue->idle_hint < lcore_idle_hint){
 					lcore_idle_hint = rx_queue->idle_hint;
+				}
 			}
 
 			if (lcore_idle_hint < SUSPEND_THRESHOLD){
@@ -1721,11 +1737,10 @@ start_rx:
 				 * microseconds for short sleep.
 				 */
 				//printf("DBG intrO ---> going to sleep for %d microseconds \n", lcore_idle_hint);
-				// rte_delay_us == rte_pause == _mm_pause == assembly stuff
 				rte_delay_us(lcore_idle_hint);
 			}
 			else {
-				//printf("DBG intrO --- curr intr_en is : %d ; if is != 0 going to turn off interrupts ! (costly)\n", intr_en);
+				//printf("DBG intrO --- curr intr_en is:%d; if is != 0 going to turn off interrupts!(costly)\n", intr_en);
 				/* suspend until rx interrupt triggers */
 				if (intr_en) {
 					turn_on_off_intr(qconf, 1);
@@ -1737,8 +1752,12 @@ start_rx:
 					/**
 					 * start receiving packets immediately
 					 */
-					if (likely(!is_done()))
+					if (likely(!is_done())){
+						// this jump does not update cur_tsc, 
+						//	which we need to be at the least reasonably-updated in our logic for cumulative_tsc;
+						cur_tsc = rte_rdtsc();
 						goto start_rx;
+					}
 				}
 			}
 		}
@@ -1746,11 +1765,14 @@ start_rx:
 
 
 	uint64_t end_tsc = rte_rdtsc_precise();
-	uint64_t idle_duration_tsc = end_tsc - cumulative_tsc;
-	uint64_t total duration = end_tsc - start_tsc
-	printf("\n\n - i am interrupt loop, i have spent %lu without packets; i have looped overall for %lu\n\n", cumulative_tsc, idle_duration_tsc);
+	// what if we end during a no-packets streak? (btw cur_tsc is not accurate perhaps..)
+	if(last_tsc != 0){
+		cumulative_tsc += (end_tsc - last_tsc);
+		last_tsc = 0;
+	}
 
-
+	uint64_t total_duration = end_tsc - start_tsc;
+	printf("\n\n - main_intr_loop - total_duration:%lu; cumulative_tsc:%lu; \n\n", total_duration, cumulative_tsc);
 
 	return 0;
 }
@@ -1839,9 +1861,12 @@ main_baselinePure_loop(__rte_unused void *dummy)
 	printf("_main_baselinePure_loop: _done for, entering while \n");
 	printf("\n\n !!!- this is the pure with the single mm_pause only if all queues are empty. --- !!! \n\n");
 	
-	uint64_t cumulative_tsc = 0;
+	// last_tsc:
+	// - if 0: means we have received packets in last/this iteration.
+	// - if !0: means we have not had packets since last_tsc.
 	uint64_t last_tsc = 0;
-	uint64_t latest_now = 0;
+	uint64_t cumulative_tsc = 0;
+	
 	uint64_t start_tsc = rte_rdtsc_precise();
 
 	while (!is_done()) {
@@ -1852,7 +1877,6 @@ main_baselinePure_loop(__rte_unused void *dummy)
 		* TX burst queue drain
 		*/
 		cur_tsc = rte_rdtsc();
-		latest_now = cur_tsc;
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_tx_port; ++i) {
@@ -1877,26 +1901,19 @@ main_baselinePure_loop(__rte_unused void *dummy)
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst,MAX_PKT_BURST);
 
 			if (nb_rx == 0){
-				// e.g.: queue 0 was empty.> adds, and here it resets the latest_now to now.
-				// __ if queues are all full in an interation, then latest_now is updated at start of while.
-				//	-> then, if all are empty and we go towards rte_delay(), we update there the time spent over the single run .
-				// if afterwards another loop is empty, then last_tsc keeps the oldest value with elements and is not overwritten.
-				// -> then, when packets arrive, we enter below here and update cumulative.
-				if (last_tsc == 0){
-					last_tsc = rte_rdtsc();
-					latest_now = last_tsc;
-				}
-				// goto next queue
+				// there were no packets in <<THIS QUEUE>>. 
+				// .. idle timing logic must be updated if all queues are empty, 
+				//		or were in pause and received something new.
+				// -> continue and process other queues.
 				continue;
-			}else{
-				if(last_tsc != 0){
-					// only the first non-empty queue updates this.
-					// DO NOT -> latest_now = rte_rdtsc(); // this would be a mistake, counting idle also busy work.
-					cumulative_tsc += (latest_now - last_tsc);
-					last_tsc = 0;
-				}
 			}
 
+			if(last_tsc != 0){
+				cumulative_tsc += (cur_tsc - last_tsc);
+				last_tsc = 0;
+			}
+
+			// |= true has no sense, since we set to true anyways, no need to read old value.
 			some_packets_this_iteration = true;
 
 			/* Prefetch first packets */
@@ -1921,19 +1938,21 @@ main_baselinePure_loop(__rte_unused void *dummy)
 		if (!some_packets_this_iteration){
 			// we arrive here because there are no packets; 
 			if (last_tsc == 0){
-				// if we had received a packet recently, that would have reset the last_tsc, and now we update the start of a new pause.
-				// otherwise, if it is set, then also last loop there were no packets, and we keep the old value of start of pause.
 				last_tsc = rte_rdtsc();
-				latest_now = last_tsc;
 			}
 			rte_pause();		
 		}
 	}
 	
 	uint64_t end_tsc = rte_rdtsc_precise();
-	uint64_t idle_duration_tsc = cumulative_tsc;
-	uint64_t total duration = end_tsc - start_tsc
-	printf("\n\n - i am pure loop, i have spent %lu without packets; i have looped overall for %lu\n\n", cumulative_tsc, idle_duration_tsc);
+	// what if we end during a no-packets streak? (btw cur_tsc is not accurate perhaps..)
+	if(last_tsc != 0){
+		cumulative_tsc += (end_tsc - last_tsc);
+		last_tsc = 0;
+	}
+
+	uint64_t total_duration = end_tsc - start_tsc;
+	printf("\n\n - main_baselinePure_loop - total_duration:%lu; cumulative_tsc:%lu; \n\n", total_duration, cumulative_tsc);
 
 	return 0;
 }
