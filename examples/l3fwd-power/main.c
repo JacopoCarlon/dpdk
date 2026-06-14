@@ -1166,6 +1166,7 @@ static int sleep_with_timeout(int num, uint64_t timeout_ms)
 //	(since all is discrete, we either are on or off ..tertium non datur)
 static void update_traffic_state(uint64_t current_tsc, bool packet_received, struct traffic_state *tstate)
 {
+	// printf("in update, packet_received?%d\n", packet_received);
 	if (packet_received) {
 		if (!tstate->in_on_phase) {
 			// Transition to ON phase
@@ -1203,6 +1204,7 @@ static void update_traffic_state(uint64_t current_tsc, bool packet_received, str
 
         tstate->consecutive_empty++;
     }
+	// printf("out of update\n");
 }
 
 
@@ -1270,7 +1272,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	struct lcore_rx_queue *rx_queue;
 	
 	// receive variables
-	uint_fast64_t i, j, nb_rx;
+	int i, j, nb_rx;	// since there is prefetch during forward loop, these can be negative!!!
 	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	
 	// hybrid logic variables
@@ -1284,7 +1286,7 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	uint_fast64_t g;
 
 
-
+	// printf("--- debugging :( \n\n");
 	printf("--- Entered main intr loop !!! \n");
 	
     const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
@@ -1380,6 +1382,8 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	uint64_t packets_toflush = 0;
 	uint64_t packets_flushed = 0;
 
+	prev_tsc = rte_rdtsc();
+
 	while (!is_done()) {
 
 		/*
@@ -1394,16 +1398,23 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
+			// printf("yes drain\n");
 			for (i = 0; i < qconf->n_tx_port; ++i) {
+				// printf("loop drain\n");
 				portid = qconf->tx_port_id[i];
-				packets_toflush = qconf->tx_buffer[portid]->length;
-				packets_flushed = rte_eth_tx_buffer_flush(portid,
-							qconf->tx_queue_id[portid],
-							qconf->tx_buffer[portid]);
-				packets_failedToFlush += (packets_toflush - packets_flushed);
+				struct rte_eth_dev_tx_buffer *tbuf = qconf->tx_buffer[portid];
+				if (unlikely(tbuf == NULL)) {
+					printf("hybrid !!! tx_buffer NULL for port %u\n", portid);
+					continue;
+				}
+				packets_toflush = tbuf->length;
+				packets_flushed = rte_eth_tx_buffer_flush(portid,qconf->tx_queue_id[portid], tbuf);
+				packets_failedToFlush += (packets_toflush > packets_flushed) ? (packets_toflush - packets_flushed) : 0;
 			}
 			prev_tsc = cur_tsc;
 		}
+
+		// printf("hybrid : done drain \n");
 
 start_rx:
 		/*
@@ -1415,6 +1426,7 @@ start_rx:
 		packets_received = false;
 		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
+			// printf("iterating i = %d\n", i);
 			rx_queue = &(qconf->rx_queue_list[i]);
 			portid = rx_queue->port_id;
 			queueid = rx_queue->queue_id;
@@ -1423,6 +1435,7 @@ start_rx:
 			
 			if (unlikely(nb_rx == 0)) {
 				// no packets on this queue, go to other queues
+				// printf("received no packets in this iteration in this queue\n");
 				continue;
 			} 
 
@@ -1457,11 +1470,14 @@ start_rx:
 			for (; j < nb_rx; j++) {
 				l3fwd_simple_forward(pkts_burst[j], portid, qconf);
 			}
+			// printf("done this fwd for this queue\n");
 		}
 		
 		// consecutive_empty shall represent FULL_ITERATIONS_WITHOUT_ANY_PACKETS !!!
 		cur_tsc = rte_rdtsc();
 		update_traffic_state(cur_tsc, packets_received, tstate);
+
+		// printf("hybrid after update traffic\n");
 
 		
 		/* Hybrid sleep decision logic */
@@ -1480,9 +1496,8 @@ start_rx:
 				// interrupts not enabled, we can only act as baselinePure
 				// i.e. execute a single mm_pause and loop
 				rte_pause();
-				// TODO: logic is in drain 
-				// continue;
-				goto start_rx;
+				continue;
+				// goto start_rx;	// here would be ok
 			}
 			
 			// to use interupt we need to either be in off phase officially, or apparently
@@ -1497,12 +1512,10 @@ start_rx:
 				// therefore again act as baselinePure so as to not impact latency during the on phase.
 				// after this mm_pause, we want to pass through the drain just in case.
 				rte_pause();
-				// TODO: logic is in drain 
-				// continue;
-				goto start_rx;
+				continue;
+				// goto start_rx;	// here would be ok
 			}
 			// we most likely are in off phase, let's see if we can interrupt with timeout
-			
 			
 			// I want the too_late_to_interrupt check to override any forced interrupt, because yes.
 			// This means we need to calculate this always..
@@ -1532,7 +1545,7 @@ start_rx:
 				// there are no packets, but there is not enough time to interrupt
 				j_rte_delay_cycles_block(tstate->suggested_sleep_cycles);
 				// -> this goes now back to top of the <while (!is_done())>
-				//	continue;
+				continue;
 			} else {
 				// // // if(!too_late_for_intr && (force_interrupt || pattern_suggests_off) && intr_en)
 				/* 
@@ -1557,12 +1570,15 @@ start_rx:
 				// otherwise returns the number of events that woke it up
 				awoken_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, timeout_ms);
 				turn_on_off_intr(qconf, 0);
+				// printf("awoken from intr\n");	// this happens
 
 				if (awoken_with_n_packets){
 					// packets_received = true;
 					if (likely(!is_done())){
 						cur_tsc = rte_rdtsc();
+						// there are packets after silence, work them.
 						goto start_rx;
+						//	continue;		
 					} 
 					// else will fall through and hit the <while (!is_done())> and then return
 				} else {
@@ -1583,6 +1599,7 @@ start_rx:
 								// packets_received = true;
 								if (likely(!is_done())){
 									cur_tsc = rte_rdtsc();
+									// there are packets after silence, work them.
 									goto start_rx;
 								}
 							}
@@ -1597,6 +1614,7 @@ start_rx:
 				// will continue to the <while (!is_done())>
 			} 
 		}
+		// printf("hybrid : at the end of while, continuing to top\n");
 	}
 
 	uint64_t total_duration = last_tsc - start_tsc;
@@ -3939,6 +3957,8 @@ mode_to_str(enum appmode mode)
 		return "interrupt-only";
 	case APP_MODE_PMD_MGMT:
 		return "pmd mgmt";
+	case APP_MODE_HYBRID:
+    	return "hybrid";
 	default:
 		return "invalid";
 	}
