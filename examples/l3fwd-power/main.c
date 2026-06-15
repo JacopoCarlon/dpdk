@@ -1273,11 +1273,11 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	
 	// receive variables
 	int i, j, nb_rx;	// since there is prefetch during forward loop, these can be negative!!!
-	uint64_t prev_tsc, diff_tsc, cur_tsc;
-	
+
+		
+
 	// hybrid logic variables
 	bool intr_en = false;
-	bool packets_received = false;
 	uint64_t elapsed_off_tsc = 0;
 	uint64_t remaining_off_tsc = 0; 
 	bool too_late_for_intr = true;
@@ -1286,11 +1286,11 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 	uint_fast64_t g;
 
 
+
 	// printf("--- debugging :( \n\n");
-	printf("--- Entered main intr loop !!! \n");
+	printf("--- Entered main hybrid loop !!! \n");
 	
     const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
-    prev_tsc = 0;
 	
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
@@ -1369,11 +1369,20 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 
 	printf("congratulations hybrid, let's start working !!! -----------------\n");
 
+
 	// last_tsc identifies the tsc of the <<<start of latest pause-phase>>>
 	// - if 0: means we have received packets in last/this iteration.
 	// - if !0: means we have not had packets since last_tsc.
+
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
+
 	uint64_t last_tsc = 0;
 	uint64_t cumulative_tsc = 0;
+
+	uint64_t int_en_start_tsc = 0;
+	uint64_t int_en_cumulative_tsc = 0;
+
+	bool some_packets_this_iteration = false;
 
 	bool test_started = false;
 	uint64_t start_tsc = 0;
@@ -1398,18 +1407,13 @@ static int main_hybrid_loop(__rte_unused void *dummy)
 		cur_tsc = rte_rdtsc();
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
-			// printf("yes drain\n");
 			for (i = 0; i < qconf->n_tx_port; ++i) {
-				// printf("loop drain\n");
 				portid = qconf->tx_port_id[i];
-				struct rte_eth_dev_tx_buffer *tbuf = qconf->tx_buffer[portid];
-				if (unlikely(tbuf == NULL)) {
-					printf("hybrid !!! tx_buffer NULL for port %u\n", portid);
-					continue;
-				}
-				packets_toflush = tbuf->length;
-				packets_flushed = rte_eth_tx_buffer_flush(portid,qconf->tx_queue_id[portid], tbuf);
-				packets_failedToFlush += (packets_toflush > packets_flushed) ? (packets_toflush - packets_flushed) : 0;
+				packets_toflush = qconf->tx_buffer[portid]->length;
+				packets_flushed = rte_eth_tx_buffer_flush(portid,
+							qconf->tx_queue_id[portid],
+							qconf->tx_buffer[portid]);
+				packets_failedToFlush += (packets_toflush - packets_flushed);
 			}
 			prev_tsc = cur_tsc;
 		}
@@ -1422,8 +1426,8 @@ start_rx:
 		*/
 	
 		// When we go through a start_rx, we come from interrupt or grace, 
-		//	and packets_received was already set to false in order to enter into them
-		packets_received = false;
+		//	and some_packets_this_iteration was already set to false in order to enter into them
+		some_packets_this_iteration = false;
 		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			// printf("iterating i = %d\n", i);
@@ -1453,7 +1457,7 @@ start_rx:
 					last_tsc = 0;
 				}
 			}
-			packets_received = true;
+			some_packets_this_iteration = true;
 			
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
@@ -1475,13 +1479,13 @@ start_rx:
 		
 		// consecutive_empty shall represent FULL_ITERATIONS_WITHOUT_ANY_PACKETS !!!
 		cur_tsc = rte_rdtsc();
-		update_traffic_state(cur_tsc, packets_received, tstate);
+		update_traffic_state(cur_tsc, some_packets_this_iteration, tstate);
 
 		// printf("hybrid after update traffic\n");
 
 		
 		/* Hybrid sleep decision logic */
-		if (likely(packets_received)){
+		if (likely(some_packets_this_iteration)){
 			// we did receive some packets, so we must busy poll.
 			continue;
 		}
@@ -1565,15 +1569,21 @@ start_rx:
 				// // uint64_t timeout_ms = ((timeout_us + 999) / 1000);
 				timeout_ms = (remaining_off_tsc + tsc_per_ms - 1) / tsc_per_ms;
 
+				int_en_start_tsc = rte_rdtsc();
+
 				turn_on_off_intr(qconf, 1);
 				// sleep_with_timeout returns 0 if woke with timeout, 
 				// otherwise returns the number of events that woke it up
 				awoken_with_n_packets = sleep_with_timeout(qconf->n_rx_queue, timeout_ms);
 				turn_on_off_intr(qconf, 0);
+
+				if(likely(test_started)){
+					int_en_cumulative_tsc += (rte_rdtsc() - int_en_start_tsc); 
+				}
 				// printf("awoken from intr\n");	// this happens
 
 				if (awoken_with_n_packets){
-					// packets_received = true;
+					// some_packets_this_iteration = true;
 					if (likely(!is_done())){
 						cur_tsc = rte_rdtsc();
 						// there are packets after silence, work them.
@@ -1596,7 +1606,7 @@ start_rx:
 							nb_rx = rte_eth_rx_burst(rx_queue->port_id, rx_queue->queue_id,
 														pkts_burst, MAX_PKT_BURST);
 							if (nb_rx > 0) {
-								// packets_received = true;
+								// some_packets_this_iteration = true;
 								if (likely(!is_done())){
 									cur_tsc = rte_rdtsc();
 									// there are packets after silence, work them.
@@ -1618,7 +1628,7 @@ start_rx:
 	}
 
 	uint64_t total_duration = last_tsc - start_tsc;
-	printf("\n\n - main_hybrid_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", test_started, total_duration, cumulative_tsc, packets_failedToFlush);
+	printf("\n\n - main_hybrid_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; int_en_cumulative_tsc:%lu; packets_failedToFlush:%lu\n\n", test_started, total_duration, cumulative_tsc, int_en_cumulative_tsc, packets_failedToFlush);
 
 	return 0;
 }
@@ -1639,21 +1649,25 @@ static int main_intr_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	int i, j, nb_rx;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
 	uint32_t lcore_rx_idle_count = 0;
 	uint32_t lcore_idle_hint = 0;
+
+
+
+
+	// interrupt logic variables
 	int intr_en = 0;
+
+
 
 	printf("--- Entered main intr loop !!! \n");
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 				US_PER_S * BURST_TX_DRAIN_US;
-
-	prev_tsc = 0;
 
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
@@ -1684,18 +1698,34 @@ static int main_intr_loop(__rte_unused void *dummy)
 	else
 		RTE_LOG(INFO, L3FWD_POWER, "RX interrupt won't enable.\n");
 
-	// last_tsc:
+
+	printf("congratulations interrupt-only, let's start working !!! -----------------\n");
+
+
+	// last_tsc identifies the tsc of the <<<start of latest pause-phase>>>
 	// - if 0: means we have received packets in last/this iteration.
 	// - if !0: means we have not had packets since last_tsc.
+
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
+
 	uint64_t last_tsc = 0;
 	uint64_t cumulative_tsc = 0;
-	
+
+	uint64_t int_en_start_tsc = 0;
+	uint64_t int_en_cumulative_tsc = 0;
+
+
+	// intr-only does not use <some_packets_this_iteration>, instead uses <zero_rx_packet_count>
+	// bool some_packets_this_iteration = false;	
+
 	bool test_started = false;
 	uint64_t start_tsc = 0;
 
 	uint64_t packets_failedToFlush = 0;
 	uint64_t packets_toflush = 0;
 	uint64_t packets_flushed = 0;
+
+	prev_tsc = rte_rdtsc();
 	
 	while (!is_done()) {
 
@@ -1719,6 +1749,7 @@ static int main_intr_loop(__rte_unused void *dummy)
 		}
 
 start_rx:
+		// !!! any goto that goes to start, shall refresh cur_tsc !!!
 		/*
 		* Read packet from RX queues
 		*/
@@ -1747,7 +1778,7 @@ start_rx:
 				
 				rx_queue->idle_hint = power_idle_heuristic(rx_queue->zero_rx_packet_count);
 				lcore_rx_idle_count++;
-				// TODO: why is this continue NOT in the original ????????
+				// TODO: why is this continue NOT in the original ..? it is not wrong, but is not nice.
 				// https://github.com/DPDK/dpdk/tree/main/examples/l3fwd-power/main.c
 				continue;
 			} else {
@@ -1793,7 +1824,7 @@ start_rx:
 			 * less as possible.
 			 */
 			if (last_tsc == 0){
-				last_tsc = rte_rdtsc();
+				last_tsc = cur_tsc;	
 			}
 			for (i = 1, lcore_idle_hint = qconf->rx_queue_list[0].idle_hint; i < qconf->n_rx_queue; ++i) {
 				rx_queue = &(qconf->rx_queue_list[i]);
@@ -1815,12 +1846,17 @@ start_rx:
 				//printf("DBG intrO --- curr intr_en is:%d; if is != 0 going to turn off interrupts!(costly)\n", intr_en);
 				/* suspend until rx interrupt triggers */
 				if (intr_en) {
+					int_en_start_tsc = rte_rdtsc();
 					turn_on_off_intr(qconf, 1);
 					// sleep_until_rx_interrupt == rte_epoll_wait == eal_epoll_wait == esce al primo evento che riceve
 					sleep_until_rx_interrupt(
 								qconf->n_rx_queue,
 								lcore_id);
 					turn_on_off_intr(qconf, 0);
+
+					if(likely(test_started)){
+						int_en_cumulative_tsc += (rte_rdtsc() - int_en_start_tsc); 
+					}
 					/**
 					 * start receiving packets immediately
 					 */
@@ -1836,7 +1872,7 @@ start_rx:
 	}
 
 	uint64_t total_duration = last_tsc - start_tsc;
-	printf("\n\n - main_intr_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", test_started, total_duration, cumulative_tsc, packets_failedToFlush);
+	printf("\n\n - main_intr_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; int_en_cumulative_tsc:%lu; packets_failedToFlush:%lu\n\n", test_started, total_duration, cumulative_tsc, int_en_cumulative_tsc, packets_failedToFlush);
 
 	return 0;
 }
@@ -1878,18 +1914,14 @@ main_baselinePure_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	int i, j, nb_rx;
-	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
-
-	prev_tsc = 0;
-
+					
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
 
@@ -1928,8 +1960,16 @@ main_baselinePure_loop(__rte_unused void *dummy)
 	// last_tsc identifies the tsc of the <<<start of latest pause-phase>>>
 	// - if 0: means we have received packets in last/this iteration.
 	// - if !0: means we have not had packets since last_tsc.
+
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
+
 	uint64_t last_tsc = 0;
 	uint64_t cumulative_tsc = 0;
+
+	//	uint64_t int_en_start_tsc = 0;		// no interrupts in pure .
+	uint64_t int_en_cumulative_tsc = 0;		// L-> hence duration will remain zero.
+
+	bool some_packets_this_iteration = false;
 
 	bool test_started = false;
 	uint64_t start_tsc = 0;
@@ -1937,6 +1977,8 @@ main_baselinePure_loop(__rte_unused void *dummy)
 	uint64_t packets_failedToFlush = 0;
 	uint64_t packets_toflush = 0;
 	uint64_t packets_flushed = 0;
+
+	prev_tsc = rte_rdtsc();
 
 	while (!is_done()) {
 
@@ -1979,6 +2021,7 @@ main_baselinePure_loop(__rte_unused void *dummy)
 			}
 
 			if(last_tsc != 0){
+				// i.e. now there are packets, but previous loop there were not:
 				if (unlikely(!test_started)){
 					// then this is the first packet, consider the test starts now.
 					test_started = true;
@@ -2017,7 +2060,8 @@ main_baselinePure_loop(__rte_unused void *dummy)
 		if (unlikely(!some_packets_this_iteration)){
 			// we arrive here because there are no packets; 
 			if (last_tsc == 0){
-				last_tsc = rte_rdtsc();
+				last_tsc = cur_tsc;
+				// last_tsc = rte_rdtsc(); // then since the start of this (just completed) loop, we were in no packets mode.
 			}
 			rte_pause();		
 		}
@@ -2030,7 +2074,7 @@ main_baselinePure_loop(__rte_unused void *dummy)
 
 	// we thus consider the experiment ended the <<latest first time>> queues returned without packets, i.e. last_tsc.
 	uint64_t total_duration = last_tsc - start_tsc;
-	printf("\n\n - main_baselinePure_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; btw packets_failedToFlush:%lu \n\n", test_started, total_duration, cumulative_tsc, packets_failedToFlush);
+	printf("\n\n - main_baselinePure_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; int_en_cumulative_tsc:%lu; packets_failedToFlush:%lu\n\n", test_started, total_duration, cumulative_tsc, int_en_cumulative_tsc, packets_failedToFlush);
 
 	return 0;
 }
@@ -2044,7 +2088,6 @@ main_pause_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	int i, j, nb_rx;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
@@ -2054,8 +2097,6 @@ main_pause_loop(__rte_unused void *dummy)
 
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
-
-	prev_tsc = 0;
 
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
@@ -2093,6 +2134,29 @@ main_pause_loop(__rte_unused void *dummy)
 	printf("\n\n !!! --- execute clb_pause() for each queue that returned empty --- !!! \n\n");
 	
 
+	// last_tsc identifies the tsc of the <<<start of latest pause-phase>>>
+	// - if 0: means we have received packets in last/this iteration.
+	// - if !0: means we have not had packets since last_tsc.
+
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
+
+	uint64_t last_tsc = 0;
+	uint64_t cumulative_tsc = 0;
+
+	//	uint64_t int_en_start_tsc = 0;		// no interrupts in pure .
+	uint64_t int_en_cumulative_tsc = 0;		// L-> hence duration will remain zero.
+
+	bool some_packets_this_iteration = false;
+
+	bool test_started = false;
+	uint64_t start_tsc = 0;
+
+	uint64_t packets_failedToFlush = 0;
+	uint64_t packets_toflush = 0;
+	uint64_t packets_flushed = 0;
+
+	prev_tsc = rte_rdtsc();
+
 	while (!is_done()) {
 
 		// printf("___ drain tx queue\n"); // this happens !
@@ -2105,9 +2169,11 @@ main_pause_loop(__rte_unused void *dummy)
 		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_tx_port; ++i) {
 				portid = qconf->tx_port_id[i];
-				rte_eth_tx_buffer_flush(portid,
-						qconf->tx_queue_id[portid],
-						qconf->tx_buffer[portid]);
+				packets_toflush = qconf->tx_buffer[portid]->length;
+				packets_flushed = rte_eth_tx_buffer_flush(portid,
+							qconf->tx_queue_id[portid],
+							qconf->tx_buffer[portid]);
+				packets_failedToFlush += (packets_toflush - packets_flushed);
 			}
 			prev_tsc = cur_tsc;
 		}
@@ -2115,7 +2181,7 @@ main_pause_loop(__rte_unused void *dummy)
 		/*
 		* Read packet from RX queues
 		*/
-		// // // // // some_packets_this_iteration = false;
+		some_packets_this_iteration = false;
 		
 		for (i = 0; i < qconf->n_rx_queue; ++i) {
 			rx_queue = &(qconf->rx_queue_list[i]);
@@ -2128,7 +2194,21 @@ main_pause_loop(__rte_unused void *dummy)
 				continue;
 			}
 
-			// // // // // some_packets_this_iteration = true;
+			some_packets_this_iteration = true;
+			if(last_tsc != 0){
+				// i.e. now there are packets, but previous loop there were not:
+				if (unlikely(!test_started)){
+					// then this is the first packet, consider the test starts now.
+					test_started = true;
+					start_tsc = cur_tsc;
+					// the first packets and previous times does not influence cumulative.
+					last_tsc = 0;
+				}else{
+					// assert(cur_tsc > last_tsc);
+					cumulative_tsc += (cur_tsc - last_tsc);
+					last_tsc = 0;
+				}
+			}
 
 			/* Prefetch first packets */
 			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
@@ -2148,10 +2228,17 @@ main_pause_loop(__rte_unused void *dummy)
 		}
 
 		// run by: pmdPause, it should not execute manually rte_pause, it does so on the clb_pause callback.
-		// // // // // // // // //if (!some_packets_this_iteration){
-		// // // // // // // // //	rte_pause();		
-		// // // // // // // // //}
+		if (unlikely(!some_packets_this_iteration)){
+			if (last_tsc == 0){
+				last_tsc = cur_tsc;
+			}
+			rte_pause();		
+		}
 	}
+
+
+	uint64_t total_duration = last_tsc - start_tsc;
+	printf("\n\n - main_pause_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; int_en_cumulative_tsc:%lu; packets_failedToFlush:%lu\n\n", test_started, total_duration, cumulative_tsc, int_en_cumulative_tsc, packets_failedToFlush);
 
 	return 0;
 }
@@ -2167,9 +2254,7 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	unsigned int lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc;
 	int i, j, nb_rx;
-	bool some_packets_this_iteration = false;
 	uint16_t portid, queueid;
 	struct lcore_conf *qconf;
 	struct lcore_rx_queue *rx_queue;
@@ -2179,8 +2264,6 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 	const uint64_t drain_tsc = (tsc_hz + US_PER_S - 1) /
 					US_PER_S * BURST_TX_DRAIN_US;
 
-	prev_tsc = 0;
-	
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
 
@@ -2221,6 +2304,29 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 
 	uint64_t busypolling_pause_duration_ns_in_cycles = ns_to_cycles(busypolling_pause_duration_ns, tsc_hz);
 
+	// last_tsc identifies the tsc of the <<<start of latest pause-phase>>>
+	// - if 0: means we have received packets in last/this iteration.
+	// - if !0: means we have not had packets since last_tsc.
+
+	uint64_t prev_tsc, diff_tsc, cur_tsc;
+
+	uint64_t last_tsc = 0;
+	uint64_t cumulative_tsc = 0;
+
+	uint64_t int_en_start_tsc = 0;
+	uint64_t int_en_cumulative_tsc = 0;
+
+	bool some_packets_this_iteration = false;
+
+	bool test_started = false;
+	uint64_t start_tsc = 0;
+
+	uint64_t packets_failedToFlush = 0;
+	uint64_t packets_toflush = 0;
+	uint64_t packets_flushed = 0;
+
+	prev_tsc = rte_rdtsc();
+
 	while (!is_done()) {
 
 		// printf("___ drain tx queue\n"); // this happens !
@@ -2233,9 +2339,11 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 		if (unlikely(diff_tsc > drain_tsc)) {
 			for (i = 0; i < qconf->n_tx_port; ++i) {
 				portid = qconf->tx_port_id[i];
-				rte_eth_tx_buffer_flush(portid,
-						qconf->tx_queue_id[portid],
-						qconf->tx_buffer[portid]);
+				packets_toflush = qconf->tx_buffer[portid]->length;
+				packets_flushed = rte_eth_tx_buffer_flush(portid,
+							qconf->tx_queue_id[portid],
+							qconf->tx_buffer[portid]);
+				packets_failedToFlush += (packets_toflush - packets_flushed);
 			}
 			prev_tsc = cur_tsc;
 		}
@@ -2254,6 +2362,21 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 
 			if (nb_rx == 0){
 				continue;
+			}
+
+			if(last_tsc != 0){
+				// i.e. now there are packets, but previous loop there were not:
+				if (unlikely(!test_started)){
+					// then this is the first packet, consider the test starts now.
+					test_started = true;
+					start_tsc = cur_tsc;
+					// the first packets and previous times does not influence cumulative.
+					last_tsc = 0;
+				}else{
+					// assert(cur_tsc > last_tsc);
+					cumulative_tsc += (cur_tsc - last_tsc);
+					last_tsc = 0;
+				}
 			}
 
 			some_packets_this_iteration = true;
@@ -2276,7 +2399,10 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 		}
 
 		// run by: busypollingWithPAUSE
-		if (!some_packets_this_iteration){
+		if (unlikely(!some_packets_this_iteration)){
+			if (last_tsc == 0){
+				last_tsc = cur_tsc;
+			}
 			// if we received no packets from any queue, then we execute the pause.
 			// --- --- test relaxing busypolling --- --- 
 			// rte_delay_us(1);
@@ -2284,6 +2410,10 @@ main_baselineWithNanoSecondPause_loop(__rte_unused void *dummy)
 			j_rte_delay_cycles_block(busypolling_pause_duration_ns_in_cycles);
 		}
 	}
+
+	// we thus consider the experiment ended the <<latest first time>> queues returned without packets, i.e. last_tsc.
+	uint64_t total_duration = last_tsc - start_tsc;
+	printf("\n\n - main_baselineWithNanoSecondPause_loop - test_started:%d; total_duration:%lu; cumulative_tsc:%lu; int_en_cumulative_tsc:%lu; packets_failedToFlush:%lu\n\n", test_started, total_duration, cumulative_tsc, int_en_cumulative_tsc, packets_failedToFlush);
 
 	return 0;
 }
